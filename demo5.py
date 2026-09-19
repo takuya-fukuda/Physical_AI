@@ -140,8 +140,30 @@ LIFT_STROKE = 0.04
 """Stroke [m] of the prismatic lift joint (0 = lowered, 0.04 = raised)."""
 LIFT_SPEED = 0.03
 """Rate [m/s] the lift position target is ramped at."""
-RENDER_INTERVAL = 4
-"""Physics steps per rendered frame. At a 120 Hz physics rate this renders the viewer at 30 Hz."""
+PHYSICS_RATE = 60.0
+"""Physics steps per second [Hz].
+
+120 Hz behaves the same but leaves no time budget for the renderer: a rendered frame costs ~23 ms
+here, so the viewer ends up showing well under 30 frames per wall-clock second and the motion looks
+choppy. At 60 Hz the mission plays back at roughly real time (verified: identical mission outcome).
+"""
+RENDER_INTERVAL = 2
+"""Physics steps per rendered frame. At :data:`PHYSICS_RATE` = 60 Hz this renders the viewer at 30 Hz.
+
+Raise it (4 -> 15 Hz) if the viewer still cannot keep up on your machine; lower it to 1 for a
+smoother picture at the cost of the mission playing back slower than real time.
+"""
+CAMERA_DISTANCE = 6.0
+"""Distance [m] the chase camera trails the AGV by."""
+CAMERA_HEIGHT = 4.5
+"""Height [m] of the chase camera above the ground."""
+CAMERA_SMOOTHING = 0.08
+"""Per-frame blend factor of the chase camera towards its desired pose (0 = frozen, 1 = rigid).
+
+The camera is moved on every rendered frame, but it eases towards the target pose instead of being
+snapped onto it: a rigidly attached camera copies every yaw wobble of the AGV, which reads as
+juddering even when the frame rate is fine.
+"""
 
 ##
 # 倉庫レイアウト [m]。AGV は右回りのループを走る。
@@ -1050,6 +1072,8 @@ def run_simulator(sim: SimulationContext, scene: InteractiveScene) -> None:
     yaw_accel = 0.0
     commanded_yaw_rate = 0.0
     lift_command = 0.0
+    camera_eye: tuple[float, float, float] | None = None
+    camera_lookat: tuple[float, float, float] | None = None
     travelled = 0.0
     previous_position = (AGV_START_POSE[0], AGV_START_POSE[1])
     drops = 0
@@ -1145,22 +1169,39 @@ def run_simulator(sim: SimulationContext, scene: InteractiveScene) -> None:
             target=torch.tensor([[lift_command]], device=device, dtype=torch.float32), joint_ids=lift_ids
         )
 
+        # -- 追従カメラ: 描画するフレームでだけ、描画の直前に更新する。
+        # カメラの更新が描画より粗いと、視点が段階的に飛んで画面全体がカクついて見える。
+        # 毎描画フレーム動かし、さらに一次ローパスで滑らかに追従させる。
+        render_this_step = step % RENDER_INTERVAL == 0
+        if render_this_step and not args_cli.headless:
+            desired_eye = (
+                position[0] - CAMERA_DISTANCE * math.cos(yaw),
+                position[1] - CAMERA_DISTANCE * math.sin(yaw),
+                CAMERA_HEIGHT,
+            )
+            desired_lookat = (position[0], position[1], 0.3)
+            if camera_eye is None:
+                camera_eye, camera_lookat = desired_eye, desired_lookat
+            else:
+                camera_eye = tuple(
+                    now + CAMERA_SMOOTHING * (goal - now) for now, goal in zip(camera_eye, desired_eye)
+                )
+                camera_lookat = tuple(
+                    now + CAMERA_SMOOTHING * (goal - now) for now, goal in zip(camera_lookat, desired_lookat)
+                )
+            sim.set_camera_view(camera_eye, camera_lookat)
+
         scene.write_data_to_sim()
         # 物理は毎ステップ、描画は RENDER_INTERVAL ステップに 1 回だけ。SimulationCfg.render_interval は
         # 標準ループ (DirectRLEnv など) 用の設定で、自前ループでは sim.step(render=...) で間引く必要がある。
-        sim.step(render=step % RENDER_INTERVAL == 0)
+        sim.step(render=render_this_step)
         sim_time += sim_dt
         step += 1
         scene.update(sim_dt)
 
-        # -- 追従カメラと進捗表示
+        # -- 進捗表示
         travelled += math.hypot(position[0] - previous_position[0], position[1] - previous_position[1])
         previous_position = position
-        if step % 20 == 0 and not args_cli.headless:
-            sim.set_camera_view(
-                (position[0] - 6.0 * math.cos(yaw), position[1] - 6.0 * math.sin(yaw), 4.5),
-                (position[0], position[1], 0.3),
-            )
         if step % 30 == 0:
             nearest_distance, nearest_bearing = scan.nearest()
             print(
@@ -1193,8 +1234,10 @@ def run_simulator(sim: SimulationContext, scene: InteractiveScene) -> None:
 
 def main() -> None:
     """Build the warehouse scene and run the AGV transport mission."""
-    # 物理は 120 Hz。描画まで毎ステップやるとビューアが重いだけなので 30 Hz に間引く (run_simulator 側で実施)。
-    sim_cfg = sim_utils.SimulationCfg(device=args_cli.device, dt=1.0 / 120.0, render_interval=RENDER_INTERVAL)
+    # 物理は PHYSICS_RATE、描画は RENDER_INTERVAL に従って間引く (実際の間引きは run_simulator 側)。
+    sim_cfg = sim_utils.SimulationCfg(
+        device=args_cli.device, dt=1.0 / PHYSICS_RATE, render_interval=RENDER_INTERVAL
+    )
     sim = SimulationContext(sim_cfg)
     sim.set_camera_view((-4.0, -9.0, 6.0), (4.0, 0.0, 0.5))
 
