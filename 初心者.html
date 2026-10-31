@@ -1,0 +1,1042 @@
+<!doctype html>
+<!--
+  初心者向け: 「行列の行と列」「同次変換行列 T」「ヤコビアン J」を、平面 2 関節アームを動かしながら学ぶページ。
+  demo7.html とは独立。外部ライブラリなし (Canvas 2D + 素の JavaScript)。
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>行列とヤコビアン入門</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --ink: #1b1f24;
+    --muted: #5d6670;
+    --line: #dde1e6;
+    --chip: #eef0f3;
+    --canvas: #fbfcfd;
+    --grid: #e6e9ee;
+    --accent: #c2410c;
+    --xaxis: #e03131;
+    --yaxis: #2f9e44;
+    --link: #5c6670;
+    --tcp: #d6336c;
+    --rot: #1c7ed6;
+    --rotbg: #e7f0fd;
+    --pos: #e8590c;
+    --posbg: #fdf0e1;
+    --j1: #7048e8;
+    --j1bg: #efeafe;
+    --j2: #0c8599;
+    --j2bg: #e3f5f8;
+    --warn: #c92a2a;
+    --warnbg: #fff0f0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111418;
+      --panel: #181c21;
+      --ink: #e6e9ed;
+      --muted: #9aa3ad;
+      --line: #2a3038;
+      --chip: #232a32;
+      --canvas: #14181d;
+      --grid: #232931;
+      --accent: #fb923c;
+      --xaxis: #ff6b6b;
+      --yaxis: #51cf66;
+      --link: #9aa3ad;
+      --tcp: #f06595;
+      --rot: #4dabf7;
+      --rotbg: #1b2a40;
+      --pos: #ff922b;
+      --posbg: #3a2717;
+      --j1: #9775fa;
+      --j1bg: #271f45;
+      --j2: #3bc9db;
+      --j2bg: #12323a;
+      --warn: #ff8787;
+      --warnbg: #3a1a1a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111418;
+    --panel: #181c21;
+    --ink: #e6e9ed;
+    --muted: #9aa3ad;
+    --line: #2a3038;
+    --chip: #232a32;
+    --canvas: #14181d;
+    --grid: #232931;
+    --accent: #fb923c;
+    --xaxis: #ff6b6b;
+    --yaxis: #51cf66;
+    --link: #9aa3ad;
+    --tcp: #f06595;
+    --rot: #4dabf7;
+    --rotbg: #1b2a40;
+    --pos: #ff922b;
+    --posbg: #3a2717;
+    --j1: #9775fa;
+    --j1bg: #271f45;
+    --j2: #3bc9db;
+    --j2bg: #12323a;
+    --warn: #ff8787;
+    --warnbg: #3a1a1a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.7 system-ui, "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+  }
+  header, main { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+  header { padding-top: 22px; }
+  header h1 { font-size: 22px; margin: 0 0 4px; }
+  header p { margin: 0; color: var(--muted); }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  nav.toc a {
+    font-size: 13px; color: var(--ink); text-decoration: none;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 2px 12px;
+  }
+  nav.toc a:hover { border-color: var(--muted); }
+  section.card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px 20px; margin: 16px 0;
+  }
+  h2 { font-size: 19px; margin: 0 0 4px; }
+  h2 .num { color: var(--accent); margin-right: 6px; }
+  .lead { color: var(--muted); margin: 0 0 14px; }
+  .demo { display: grid; grid-template-columns: minmax(0, 1fr) 370px; gap: 18px; align-items: start; }
+  @media (max-width: 880px) { .demo { grid-template-columns: minmax(0, 1fr); } }
+  canvas.view {
+    display: block; width: 100%;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--canvas);
+    touch-action: none;
+  }
+  .ctrl { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 10px; font-size: 13.5px; }
+  .ctrl label { display: inline-flex; align-items: center; gap: 6px; }
+  .ctrl .val { font-variant-numeric: tabular-nums; min-width: 44px; color: var(--muted); }
+  input[type=range] { width: 150px; accent-color: var(--accent); }
+  input[type=checkbox] { accent-color: var(--accent); }
+  button {
+    font: inherit; font-size: 13.5px; color: var(--ink); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px; padding: 3px 12px; cursor: pointer;
+  }
+  button:hover { border-color: var(--muted); }
+  button.on { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+  .scroll { overflow-x: auto; }
+  .hint { font-size: 12.5px; color: var(--muted); margin: 6px 0 0; }
+
+  /* --- 1. 行と列 --- */
+  .rc { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 24px; align-items: center; }
+  @media (max-width: 700px) { .rc { grid-template-columns: minmax(0, 1fr); } }
+  table.g { border-collapse: separate; border-spacing: 4px; }
+  table.g th { font-weight: normal; font-size: 12.5px; color: var(--muted); padding: 0 4px; transition: color .2s; }
+  table.g th.on { color: var(--accent); font-weight: 700; }
+  table.g td {
+    width: 58px; height: 46px; text-align: center; border-radius: 6px;
+    background: var(--chip); font: 15px ui-monospace, SFMono-Regular, Consolas, monospace;
+    cursor: pointer; transition: background .25s, color .25s;
+  }
+  table.g td.row-on { background: var(--rotbg); }
+  table.g td.col-on { background: var(--posbg); }
+  table.g td.cell-on { background: var(--accent); color: #fff; font-weight: 700; }
+  .caption { font-size: 17px; min-height: 3.4em; }
+  .tip { background: var(--chip); border-radius: 8px; padding: 10px 14px; font-size: 13.5px; margin-top: 12px; }
+
+  /* --- 行列表示 --- */
+  .mwrap { display: inline-grid; grid-template-columns: auto auto; column-gap: 6px; --cw: 80px; --rh: 44px; }
+  .mwrap .colh { display: flex; padding: 0 8px; align-self: end; }
+  .mwrap .colh span { width: var(--cw); text-align: center; font-size: 11.5px; color: var(--muted); line-height: 1.3; padding-bottom: 3px; }
+  .mwrap .rowh { padding-top: 2px; }
+  .mwrap .rowh div { height: var(--rh); display: flex; align-items: center; justify-content: flex-end; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+  .mat { display: inline-block; position: relative; padding: 2px 8px; }
+  .mat::before, .mat::after {
+    content: ""; position: absolute; top: 0; bottom: 0; width: 6px;
+    border: 1.5px solid var(--ink);
+  }
+  .mat::before { left: 0; border-right: none; }
+  .mat::after { right: 0; border-left: none; }
+  table.m { border-collapse: separate; border-spacing: 0; }
+  table.m td {
+    width: var(--cw); height: var(--rh); padding: 0 6px; text-align: right;
+    font: 13px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums;
+    border-radius: 4px; cursor: pointer; white-space: nowrap;
+  }
+  table.m td .nm { display: block; font-size: 10.5px; color: var(--muted); }
+  table.m td.rot { background: var(--rotbg); }
+  table.m td.pos { background: var(--posbg); }
+  table.m td.fix { color: var(--muted); }
+  table.m td.c1 { background: var(--j1bg); }
+  table.m td.c2 { background: var(--j2bg); }
+  table.m td.colhl { outline: 1px dashed var(--muted); outline-offset: -2px; }
+  table.m td.sel { outline: 2px solid var(--ink); outline-offset: -2px; }
+  .explain { background: var(--chip); border-radius: 8px; padding: 10px 14px; font-size: 13.5px; margin-top: 12px; }
+  .explain b.big { font-size: 15.5px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 4px; }
+  .meter { height: 8px; background: var(--chip); border-radius: 99px; overflow: hidden; margin-top: 4px; }
+  .meter > div { height: 100%; background: var(--accent); width: 50%; transition: width .1s; }
+  .warn { display: none; color: var(--warn); background: var(--warnbg); border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-top: 10px; }
+  .warn.on { display: block; }
+  .eq { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+  .eq .mwrap { --cw: 66px; --rh: 32px; }
+  .eq .op { font-size: 18px; color: var(--muted); }
+  .eqcol { display: flex; flex-direction: column; align-items: center; }
+  .eqcol .cap { font-size: 11.5px; color: var(--muted); }
+  .steps { margin: 8px 0 0; padding-left: 20px; font-size: 13.5px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13.5px; margin-top: 6px; }
+  .kv span:nth-child(odd) { color: var(--muted); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
+  table.cmp { border-collapse: collapse; width: 100%; font-size: 14px; }
+  table.cmp th, table.cmp td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+  table.cmp th { color: var(--muted); font-weight: normal; font-size: 13px; }
+  footer { max-width: 1120px; margin: 0 auto; padding: 4px 16px 30px; color: var(--muted); font-size: 12.5px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>はじめての「行列」と「ヤコビアン」</h1>
+  <p>2 本の腕（リンク）と 2 つの関節だけのロボットアームを動かしながら、行列の数字が何を表しているかを見ていきます。</p>
+  <nav class="toc">
+    <a href="#s1">1. 行と列</a>
+    <a href="#s2">2. 位置と向きの行列 T</a>
+    <a href="#s3">3. ヤコビアン J</a>
+    <a href="#s4">4. ヤコビアンの使い道</a>
+    <a href="#s5">5. 3D になると</a>
+  </nav>
+</header>
+
+<main>
+  <!-- ===================================================================== -->
+  <section class="card" id="s1">
+    <h2><span class="num">1</span>行列の「行」と「列」</h2>
+    <p class="lead">行列は数字を四角く並べたものです。横の並びを<b>行</b>、縦の並びを<b>列</b>と呼びます。マスにマウスを乗せる（タップする）と、そのマスが何行何列目かを表示します。</p>
+    <div class="rc">
+      <div class="scroll"><table class="g" id="grid4"></table></div>
+      <div>
+        <div class="caption" id="rcCaption"></div>
+        <button id="rcPlay" class="on">▶ 自動で説明中</button>
+        <div class="tip">
+          <b>覚え方</b>：「行」という字の右側には<b>横線</b>が 2 本 → 横の並び。
+          「列」という字の右側（刂）には<b>縦線</b>が 2 本 → 縦の並び。<br>
+          呼ぶときは必ず <b>行 → 列</b> の順です。「2行3列目」なら、上から 2 番目の行と、左から 3 番目の列が交わるマス（a<sub>23</sub>）です。
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section class="card" id="s2">
+    <h2><span class="num">2</span>位置と向きをまとめた行列 T</h2>
+    <p class="lead">指先（ツール先端）が<b>どこにあるか</b>と<b>どちらを向いているか</b>を、1 つの行列にまとめたものです。行列のマスをクリックすると、その数字が図のどの部分を表すかが分かります。</p>
+    <div class="demo">
+      <div>
+        <canvas class="view" id="cv2"></canvas>
+        <div class="ctrl">
+          <label>関節1 θ₁ <input type="range" id="s2q1" min="0" max="180" step="any" value="90"><span class="val" id="s2q1v"></span></label>
+          <label>関節2 θ₂ <input type="range" id="s2q2" min="-150" max="150" step="any" value="40"><span class="val" id="s2q2v"></span></label>
+          <label><input type="checkbox" id="s2auto" checked> 自動で動かす</label>
+        </div>
+        <div class="legend">
+          <span><span class="sw" style="background:var(--xaxis)"></span>x 軸（ツールの x 軸＝指先の向き）</span>
+          <span><span class="sw" style="background:var(--yaxis)"></span>y 軸</span>
+          <span><span class="sw" style="background:var(--tcp)"></span>指先（TCP）</span>
+        </div>
+      </div>
+      <div>
+        <div class="scroll"><div id="mat2"></div></div>
+        <div class="legend">
+          <span><span class="sw" style="background:var(--rotbg);border:1px solid var(--rot)"></span>向き（回転 R）</span>
+          <span><span class="sw" style="background:var(--posbg);border:1px solid var(--pos)"></span>位置 p [m]</span>
+        </div>
+        <div class="explain" id="exp2"></div>
+        <p class="hint">縦に読むのがコツです。1 列目 ＝ ツール x 軸の向き、2 列目 ＝ ツール y 軸の向き、3 列目 ＝ 指先の位置。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section class="card" id="s3">
+    <h2><span class="num">3</span>ヤコビアン J ―「関節を少し回したら、指先はどう動く？」の表</h2>
+    <p class="lead">関節を<b>ほんの少し</b>回したときに、指先がどの向きにどれだけ動くかを並べた表です。<b>列 ＝ どの関節を回したか</b>、<b>行 ＝ 指先のどの動き（x・y・向き）か</b>を表します。</p>
+    <div class="demo">
+      <div>
+        <canvas class="view" id="cv3"></canvas>
+        <div class="ctrl">
+          <button data-mode="j1" class="on">関節1だけゆらす</button>
+          <button data-mode="j2">関節2だけゆらす</button>
+          <button data-mode="none">止めて両方の矢印を見る</button>
+          <button id="s3straight">腕を伸ばしきる（特異点）</button>
+        </div>
+        <div class="ctrl">
+          <label>関節1 θ₁ <input type="range" id="s3q1" min="0" max="180" step="any" value="60"><span class="val" id="s3q1v"></span></label>
+          <label>関節2 θ₂ <input type="range" id="s3q2" min="-150" max="150" step="any" value="70"><span class="val" id="s3q2v"></span></label>
+        </div>
+        <p class="hint">矢印 ＝ 関節を 0.35 rad（約 20°）回したときに指先が動く向きと量（近似）。点線 ＝ 回している関節から指先までの「てこの腕」。矢印は点線と必ず直角になり、点線が長いほど矢印も長くなります。</p>
+      </div>
+      <div>
+        <div class="scroll"><div id="mat3"></div></div>
+        <div class="legend">
+          <span><span class="sw" style="background:var(--j1)"></span>1 列目 ＝ 関節1 を回したとき</span>
+          <span><span class="sw" style="background:var(--j2)"></span>2 列目 ＝ 関節2 を回したとき</span>
+        </div>
+        <div class="explain" id="exp3"></div>
+        <div style="margin-top:10px;font-size:13px">
+          指先の動かしやすさ（行列式 det）：<span class="mono" id="det3"></span>
+          <div class="meter"><div id="det3bar"></div></div>
+        </div>
+        <div class="warn" id="warn3">⚠ 特異点の近くです。2 本の矢印がほぼ同じ直線上に並ぶので、指先を<b>腕が伸びる方向（半径方向）</b>には動かせません。どれだけ関節を回しても届かない方向がある状態です。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section class="card" id="s4">
+    <h2><span class="num">4</span>ヤコビアンの使い道：目標に指先を近づける</h2>
+    <p class="lead">ヤコビアンは「関節 → 指先」の関係なので、逆に使えば「指先をこう動かしたい → 関節をどれだけ回す？」が計算できます。図の中の <b>◎（目標）</b>をドラッグしてみてください。</p>
+    <div class="demo">
+      <div>
+        <canvas class="view" id="cv4"></canvas>
+        <div class="ctrl">
+          <label><input type="checkbox" id="s4auto" checked> 目標を自動で動かす</label>
+        </div>
+        <ol class="steps">
+          <li>指先から目標までのずれのうち、少しだけ（Δp）進むことにする</li>
+          <li><b>Δq = J⁻¹ Δp</b> で、各関節を何度回せばよいかを計算する</li>
+          <li>関節を Δq だけ回す → 1 に戻る（これを毎フレーム繰り返す）</li>
+        </ol>
+      </div>
+      <div>
+        <div class="scroll">
+          <div class="eq">
+            <div class="eqcol"><div id="ikDq"></div><span class="cap">Δq [°]</span></div>
+            <span class="op">=</span>
+            <div class="eqcol"><div id="ikJ"></div><span class="cap">J⁻¹（J の逆行列）</span></div>
+            <span class="op">⁻¹</span>
+            <div class="eqcol"><div id="ikDp"></div><span class="cap">Δp [mm]</span></div>
+          </div>
+        </div>
+        <p class="hint">真ん中は J（位置の 2 行だけ）。実際には、特異点で値が暴れないように少し工夫した逆行列（減衰付き最小二乗法）を使っています。Isaac Lab の DifferentialIKController も同じ考え方です。</p>
+        <div class="explain">
+          <b>もう 1 つの使い道：力の計算</b><br>
+          指先で目標の方向に <b>1 N</b> の力で押したいとき、各関節に必要なトルクは <b>τ = Jᵀ F</b>（J を転置して掛ける）で求められます。
+          <div class="kv mono">
+            <span>力 F [N]</span><span id="ikF"></span>
+            <span>関節1 τ₁ [N·m]</span><span id="ikT1"></span>
+            <span>関節2 τ₂ [N·m]</span><span id="ikT2"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section class="card" id="s5">
+    <h2><span class="num">5</span>3D（実際のロボット）になると</h2>
+    <p class="lead">考え方はまったく同じで、軸が 1 本（z）増えるぶん行列が大きくなるだけです。</p>
+    <div class="scroll">
+      <table class="cmp">
+        <tr><th></th><th>このページ（平面・2 関節）</th><th>3D のロボット（例: 5 関節の SO-101）</th></tr>
+        <tr><td>位置と向きの行列 T</td><td>3×3 ＝ 向き 2×2 ＋ 位置 2 個 ＋ 飾りの行</td><td>4×4 ＝ 向き 3×3 ＋ 位置 3 個（x, y, z）＋ 飾りの行</td></tr>
+        <tr><td>1 行 1 列目 R<sub>11</sub></td><td>cos φ（ツール x 軸とベース x 軸の角度）</td><td>ツール x 軸をベース x 方向に影を落とした長さ（同じ意味）</td></tr>
+        <tr><td>ヤコビアン J</td><td>3×2 ＝ (x 速度, y 速度, 回転) × 関節 2 個</td><td>6×5 ＝ (x, y, z 速度, x・y・z 軸まわりの回転) × 関節 5 個</td></tr>
+        <tr><td>J の 1 列</td><td>関節を回したときの指先の動き</td><td>同じ。回転軸が指先を通る関節（手首のロールなど）は、位置の 3 行が 0 になる</td></tr>
+      </table>
+    </div>
+  </section>
+</main>
+<footer>リンク長は 1 本目 0.15 m、2 本目 0.12 m。角度は図の上で反時計回りが正です。</footer>
+
+<script>
+"use strict";
+
+// ============================================================================
+// 共通: 平面 2 関節アーム
+// ============================================================================
+/** @typedef {[number, number]} Vec2 */
+/** @typedef {{ j1: Vec2, j2: Vec2, p: Vec2, phi: number }} ArmPose */
+/** @typedef {{ xmin: number, xmax: number, ymin: number, ymax: number }} WorldBox */
+
+const DEG = Math.PI / 180;
+const L1 = 0.15; // 1 本目のリンク [m]
+const L2 = 0.12; // 2 本目のリンク [m]
+const BOX = { xmin: -0.30, xmax: 0.30, ymin: -0.05, ymax: 0.31 };
+
+/** @param {string} id @returns {HTMLElement} */
+const $ = (id) => /** @type {HTMLElement} */ (document.getElementById(id));
+/** @param {number} v @param {number} [d] @returns {string} */
+const fmt = (v, d = 3) => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(d);
+/** @param {number} a @returns {number} 角度を (-π, π] に */
+const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+/** @param {Vec2} a @param {Vec2} b @returns {Vec2} */
+const add = (a, b) => [a[0] + b[0], a[1] + b[1]];
+/** @param {Vec2} a @param {Vec2} b @returns {Vec2} */
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1]];
+/** @param {Vec2} a @param {number} s @returns {Vec2} */
+const mul = (a, s) => [a[0] * s, a[1] * s];
+/** @param {Vec2} a @returns {number} */
+const len = (a) => Math.hypot(a[0], a[1]);
+
+/**
+ * 順運動学: 関節角から各関節と指先の位置、指先の向きを求める。
+ * @param {number} q1 関節1 [rad]
+ * @param {number} q2 関節2 [rad]
+ * @returns {ArmPose}
+ */
+function fk(q1, q2) {
+  const j2 = /** @type {Vec2} */ ([L1 * Math.cos(q1), L1 * Math.sin(q1)]);
+  const phi = q1 + q2;
+  return { j1: [0, 0], j2, p: [j2[0] + L2 * Math.cos(phi), j2[1] + L2 * Math.sin(phi)], phi };
+}
+
+/**
+ * ヤコビアン 3×2。行 = (指先 x 速度, 指先 y 速度, 向きの回転速度)、列 = (関節1, 関節2)。
+ * @param {number} q1 [rad]
+ * @param {number} q2 [rad]
+ * @returns {number[][]}
+ */
+function jacobian(q1, q2) {
+  const s1 = Math.sin(q1), c1 = Math.cos(q1), s12 = Math.sin(q1 + q2), c12 = Math.cos(q1 + q2);
+  return [
+    [-L1 * s1 - L2 * s12, -L2 * s12],
+    [L1 * c1 + L2 * c12, L2 * c12],
+    [1, 1],
+  ];
+}
+
+// ============================================================================
+// 色トークン (CSS 変数) を Canvas 用に読む
+// ============================================================================
+/** @type {Record<string, string>} */
+const C = {};
+const TOKEN_NAMES = ["canvas", "grid", "ink", "muted", "panel", "xaxis", "yaxis", "link", "tcp", "rot", "pos", "j1", "j2", "accent"];
+function readTokens() {
+  const cs = getComputedStyle(document.documentElement);
+  for (const k of TOKEN_NAMES) C[k] = cs.getPropertyValue("--" + k).trim();
+}
+readTokens();
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", readTokens);
+
+// ============================================================================
+// Canvas 描画 (ワールド座標 [m] → ピクセル)
+// ============================================================================
+class View {
+  /**
+   * @param {HTMLCanvasElement} canvas
+   * @param {WorldBox} box 表示するワールド範囲 [m]
+   */
+  constructor(canvas, box) {
+    this.canvas = canvas;
+    this.box = box;
+    this.ctx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext("2d"));
+    this.s = 1;
+    this.w = 0;
+    this.h = 0;
+    this.resize();
+  }
+
+  resize() {
+    const b = this.box;
+    const w = this.canvas.clientWidth || 600;
+    const h = (w * (b.ymax - b.ymin)) / (b.xmax - b.xmin);
+    this.canvas.style.height = h + "px";
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.canvas.width = Math.round(w * dpr);
+    this.canvas.height = Math.round(h * dpr);
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.w = w;
+    this.h = h;
+    this.s = w / (b.xmax - b.xmin);
+  }
+
+  /** @param {Vec2} p ワールド [m] @returns {Vec2} ピクセル */
+  px(p) { return [(p[0] - this.box.xmin) * this.s, (this.box.ymax - p[1]) * this.s]; }
+
+  /** @param {number} cx @param {number} cy @returns {Vec2} ワールド [m] */
+  world(cx, cy) { return [cx / this.s + this.box.xmin, this.box.ymax - cy / this.s]; }
+
+  /** 背景と 5 cm 方眼 */
+  clear() {
+    const c = this.ctx, b = this.box, step = 0.05;
+    c.fillStyle = C.canvas;
+    c.fillRect(0, 0, this.w, this.h);
+    c.strokeStyle = C.grid;
+    c.lineWidth = 1;
+    c.beginPath();
+    for (let x = Math.ceil(b.xmin / step) * step; x <= b.xmax + 1e-9; x += step) {
+      const X = this.px([x, 0])[0];
+      c.moveTo(X, 0); c.lineTo(X, this.h);
+    }
+    for (let y = Math.ceil(b.ymin / step) * step; y <= b.ymax + 1e-9; y += step) {
+      const Y = this.px([0, y])[1];
+      c.moveTo(0, Y); c.lineTo(this.w, Y);
+    }
+    c.stroke();
+    this.label("1 マス = 5 cm", [b.xmax, b.ymin], C.muted, "right", -8, -10, 11);
+  }
+
+  /** @param {Vec2} a @param {Vec2} b @param {string} color @param {number} [width] @param {number[]} [dash] */
+  line(a, b, color, width = 2, dash = []) {
+    const c = this.ctx, A = this.px(a), B = this.px(b);
+    c.save();
+    c.strokeStyle = color; c.lineWidth = width; c.setLineDash(dash); c.lineCap = "round";
+    c.beginPath(); c.moveTo(A[0], A[1]); c.lineTo(B[0], B[1]); c.stroke();
+    c.restore();
+  }
+
+  /** @param {Vec2} a 始点 @param {Vec2} b 先端 @param {string} color @param {number} [width] */
+  arrow(a, b, color, width = 3) {
+    const c = this.ctx, A = this.px(a), B = this.px(b);
+    const dx = B[0] - A[0], dy = B[1] - A[1], L = Math.hypot(dx, dy);
+    if (L < 2) return;
+    const head = Math.min(Math.max(9, width * 3), L * 0.6);
+    const ux = dx / L, uy = dy / L;
+    const bx = B[0] - ux * head, by = B[1] - uy * head;
+    c.save();
+    c.strokeStyle = color; c.fillStyle = color; c.lineWidth = width; c.lineCap = "round";
+    c.beginPath(); c.moveTo(A[0], A[1]); c.lineTo(bx, by); c.stroke();
+    c.beginPath();
+    c.moveTo(B[0], B[1]);
+    c.lineTo(bx - uy * head * 0.5, by + ux * head * 0.5);
+    c.lineTo(bx + uy * head * 0.5, by - ux * head * 0.5);
+    c.closePath(); c.fill();
+    c.restore();
+  }
+
+  /** @param {Vec2} p @param {number} r [px] @param {string} fill @param {string} [stroke] @param {number} [lw] */
+  dot(p, r, fill, stroke, lw = 2) {
+    const c = this.ctx, P = this.px(p);
+    c.beginPath(); c.arc(P[0], P[1], r, 0, Math.PI * 2);
+    c.fillStyle = fill; c.fill();
+    if (stroke) { c.strokeStyle = stroke; c.lineWidth = lw; c.stroke(); }
+  }
+
+  /**
+   * @param {string} text @param {Vec2} p @param {string} color
+   * @param {CanvasTextAlign} [align] @param {number} [dx] @param {number} [dy] @param {number} [size]
+   */
+  label(text, p, color, align = "left", dx = 0, dy = 0, size = 13) {
+    const c = this.ctx, P = this.px(p);
+    c.save();
+    c.font = `600 ${size}px system-ui, "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif`;
+    c.textAlign = align; c.textBaseline = "middle";
+    c.lineWidth = 4; c.strokeStyle = C.canvas; c.lineJoin = "round";
+    c.strokeText(text, P[0] + dx, P[1] + dy);
+    c.fillStyle = color;
+    c.fillText(text, P[0] + dx, P[1] + dy);
+    c.restore();
+  }
+
+  /** 角度の円弧。a0 → a1 [rad] (ワールドの反時計回りが正) @param {Vec2} center @param {number} r [px] */
+  arc(center, r, a0, a1, color, width = 2) {
+    const c = this.ctx, P = this.px(center);
+    c.save();
+    c.strokeStyle = color; c.lineWidth = width;
+    c.beginPath(); c.arc(P[0], P[1], r, -a0, -a1, a1 > a0); c.stroke();
+    c.restore();
+  }
+
+  /** 直角マーク @param {Vec2} corner @param {Vec2} u 単位ベクトル @param {Vec2} v 単位ベクトル */
+  rightAngle(corner, u, v, color, size = 10) {
+    const c = this.ctx, P = this.px(corner);
+    const a = [P[0] + u[0] * size, P[1] - u[1] * size];
+    const b = [a[0] + v[0] * size, a[1] - v[1] * size];
+    const d = [P[0] + v[0] * size, P[1] - v[1] * size];
+    c.save();
+    c.strokeStyle = color; c.lineWidth = 1.5;
+    c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.lineTo(d[0], d[1]); c.stroke();
+    c.restore();
+  }
+}
+
+/** @param {View} v @param {ArmPose} pose @param {number} [alpha] */
+function drawArm(v, pose, alpha = 1) {
+  const c = v.ctx;
+  c.save();
+  c.globalAlpha = alpha;
+  const B = v.px([0, 0]);
+  c.fillStyle = C.link;
+  c.fillRect(B[0] - 20, B[1] + 8, 40, 9);
+  c.strokeStyle = C.link; c.lineWidth = 12; c.lineCap = "round"; c.lineJoin = "round";
+  const P0 = v.px(pose.j1), P1 = v.px(pose.j2), P2 = v.px(pose.p);
+  c.beginPath(); c.moveTo(P0[0], P0[1]); c.lineTo(P1[0], P1[1]); c.lineTo(P2[0], P2[1]); c.stroke();
+  v.dot(pose.j1, 8, C.panel, C.ink);
+  v.dot(pose.j2, 7, C.panel, C.ink);
+  v.dot(pose.p, 5, C.tcp);
+  c.restore();
+}
+
+/** ベース座標系の x, y 軸 @param {View} v */
+function drawBaseAxes(v) {
+  const L = 0.045;
+  v.arrow([0, 0], [L, 0], C.xaxis, 2);
+  v.arrow([0, 0], [0, L], C.yaxis, 2);
+  v.label("x", [L, 0], C.xaxis, "left", 4, 10, 12);
+  v.label("y", [0, L], C.yaxis, "left", -14, 0, 12);
+  v.label("ベース（根元）", [0, 0], C.muted, "center", 0, 32, 11);
+}
+
+/** @param {View} v @param {ArmPose} pose @param {number} L 軸の長さ [m] @param {string} [suffix] */
+function drawToolAxes(v, pose, L, suffix = "") {
+  const ex = /** @type {Vec2} */ ([Math.cos(pose.phi), Math.sin(pose.phi)]);
+  const ey = /** @type {Vec2} */ ([-Math.sin(pose.phi), Math.cos(pose.phi)]);
+  v.arrow(pose.p, add(pose.p, mul(ex, L)), C.xaxis, 3);
+  v.arrow(pose.p, add(pose.p, mul(ey, L)), C.yaxis, 3);
+  v.label("ツール x" + suffix, add(pose.p, mul(ex, L * 1.25)), C.xaxis, "center", 0, 0, 12);
+  v.label("ツール y" + suffix, add(pose.p, mul(ey, L * 1.25)), C.yaxis, "center", 0, 0, 12);
+}
+
+/**
+ * 行と列の見出しつきで、[ ] で囲んだ行列を作る。
+ * @param {HTMLElement} host
+ * @param {string[]} rowLabels
+ * @param {string[]} colLabels
+ * @param {number} nr
+ * @param {number} nc
+ * @param {(r: number, c: number) => string} cls
+ * @returns {HTMLTableCellElement[][]}
+ */
+function buildMatrix(host, rowLabels, colLabels, nr, nc, cls) {
+  host.classList.add("mwrap");
+  const corner = document.createElement("div");
+  const ch = document.createElement("div");
+  ch.className = "colh";
+  for (const l of colLabels) { const s = document.createElement("span"); s.innerHTML = l; ch.appendChild(s); }
+  const rh = document.createElement("div");
+  rh.className = "rowh";
+  for (const l of rowLabels) { const d = document.createElement("div"); d.innerHTML = l; rh.appendChild(d); }
+  const mat = document.createElement("span");
+  mat.className = "mat";
+  const table = document.createElement("table");
+  table.className = "m";
+  /** @type {HTMLTableCellElement[][]} */
+  const cells = [];
+  for (let r = 0; r < nr; r++) {
+    const tr = document.createElement("tr");
+    /** @type {HTMLTableCellElement[]} */
+    const row = [];
+    for (let c = 0; c < nc; c++) {
+      const td = document.createElement("td");
+      td.className = cls(r, c);
+      tr.appendChild(td);
+      row.push(td);
+    }
+    table.appendChild(tr);
+    cells.push(row);
+  }
+  mat.appendChild(table);
+  host.append(corner, ch, rh, mat);
+  return cells;
+}
+
+/** @type {View[]} */
+const views = [];
+/** @type {((t: number) => void)[]} */
+const frames = [];
+
+// ============================================================================
+// 1. 行と列
+// ============================================================================
+(function sectionRowsCols() {
+  const SUB = ["₀", "₁", "₂", "₃", "₄"];
+  const table = /** @type {HTMLTableElement} */ ($("grid4"));
+  const caption = $("rcCaption");
+  const playBtn = $("rcPlay");
+  /** @type {HTMLTableCellElement[][]} */
+  const cells = [];
+  /** @type {HTMLTableCellElement[]} */
+  const rowHeads = [];
+  /** @type {HTMLTableCellElement[]} */
+  const colHeads = [];
+
+  const head = document.createElement("tr");
+  head.appendChild(document.createElement("th"));
+  for (let c = 0; c < 4; c++) {
+    const th = document.createElement("th");
+    th.textContent = `${c + 1}列`;
+    head.appendChild(th);
+    colHeads.push(th);
+  }
+  table.appendChild(head);
+  for (let r = 0; r < 4; r++) {
+    const tr = document.createElement("tr");
+    const th = document.createElement("th");
+    th.textContent = `${r + 1}行`;
+    tr.appendChild(th);
+    rowHeads.push(th);
+    /** @type {HTMLTableCellElement[]} */
+    const row = [];
+    for (let c = 0; c < 4; c++) {
+      const td = document.createElement("td");
+      td.textContent = `a${SUB[r + 1]}${SUB[c + 1]}`;
+      tr.appendChild(td);
+      row.push(td);
+    }
+    table.appendChild(tr);
+    cells.push(row);
+  }
+
+  /** @typedef {{ rows?: number[], cols?: number[], cell?: [number, number], text: string }} RcStep */
+
+  /** @param {RcStep} st */
+  function show(st) {
+    const rows = st.rows || [], cols = st.cols || [];
+    cells.forEach((row, r) => row.forEach((td, c) => {
+      td.classList.toggle("row-on", rows.includes(r));
+      td.classList.toggle("col-on", cols.includes(c));
+      td.classList.toggle("cell-on", !!st.cell && st.cell[0] === r && st.cell[1] === c);
+    }));
+    rowHeads.forEach((th, r) => th.classList.toggle("on", rows.includes(r)));
+    colHeads.forEach((th, c) => th.classList.toggle("on", cols.includes(c)));
+    caption.innerHTML = st.text;
+  }
+
+  /** @type {RcStep[]} */
+  const STEPS = [
+    { rows: [0], text: "横の並びを<b>「行」</b>と呼びます。これが<b>1行目</b>。" },
+    { rows: [1], text: "上から 2 番目の横の並びが<b>2行目</b>。" },
+    { rows: [3], text: "いちばん下が<b>4行目</b>。" },
+    { cols: [0], text: "縦の並びを<b>「列」</b>と呼びます。これが<b>1列目</b>。" },
+    { cols: [2], text: "左から 3 番目の縦の並びが<b>3列目</b>。" },
+    { rows: [0], cols: [0], cell: [0, 0], text: "1行目と1列目が交わる左上のマスが<b>1行1列目</b>（a<sub>11</sub>）。" },
+    { rows: [1], cols: [2], cell: [1, 2], text: "2行目と3列目が交わるマスが<b>2行3列目</b>（a<sub>23</sub>）。先に行、次に列と読みます。" },
+  ];
+  let i = 0, auto = true, hovering = false;
+  const tick = () => { if (!auto || hovering) return; show(STEPS[i]); i = (i + 1) % STEPS.length; };
+  tick();
+  setInterval(tick, 2200);
+
+  cells.forEach((row, r) => row.forEach((td, c) => {
+    td.addEventListener("pointerenter", () => {
+      hovering = true;
+      show({ rows: [r], cols: [c], cell: [r, c], text: `このマスは <b>${r + 1}行${c + 1}列目</b>（a<sub>${r + 1}${c + 1}</sub>）。上から ${r + 1} 番目の行と、左から ${c + 1} 番目の列が交わる場所です。` });
+    });
+  }));
+  table.addEventListener("pointerleave", () => { hovering = false; });
+  playBtn.addEventListener("click", () => {
+    auto = !auto;
+    playBtn.classList.toggle("on", auto);
+    playBtn.textContent = auto ? "▶ 自動で説明中" : "▶ 自動で説明する";
+    if (auto) tick();
+  });
+})();
+
+// ============================================================================
+// 2. 同次変換行列 T
+// ============================================================================
+(function sectionTransform() {
+  const view = new View(/** @type {HTMLCanvasElement} */ ($("cv2")), BOX);
+  views.push(view);
+  const q1In = /** @type {HTMLInputElement} */ ($("s2q1"));
+  const q2In = /** @type {HTMLInputElement} */ ($("s2q2"));
+  const autoIn = /** @type {HTMLInputElement} */ ($("s2auto"));
+  const explain = $("exp2");
+  const KEYS = [["R11", "R12", "px"], ["R21", "R22", "py"], ["z1", "z2", "z3"]];
+  /** @type {Record<string, number>} */
+  const COL_OF = { R11: 0, R21: 0, R12: 1, R22: 1, px: 2, py: 2 };
+  const cells = buildMatrix($("mat2"), ["x", "y", "（飾り）"], ["1列目<br>ツール x 軸", "2列目<br>ツール y 軸", "3列目<br>位置 [m]"], 3, 3,
+    (r, c) => (r === 2 ? "fix" : c === 2 ? "pos" : "rot"));
+  let sel = "R11";
+  cells.forEach((row, r) => row.forEach((td, c) => td.addEventListener("click", () => { sel = KEYS[r][c]; })));
+  [q1In, q2In].forEach((el) => el.addEventListener("input", () => { autoIn.checked = false; }));
+  const UNIT = 0.07; // 「長さ 1」の矢印をこの長さ [m] で描く
+
+  /** @param {number} t [s] */
+  frames.push((t) => {
+    if (autoIn.checked) {
+      q1In.value = String(90 + 55 * Math.sin(t * 0.45));
+      q2In.value = String(75 * Math.sin(t * 0.7 + 0.6));
+    }
+    const q1 = Number(q1In.value) * DEG, q2 = Number(q2In.value) * DEG;
+    $("s2q1v").textContent = `${(q1 / DEG).toFixed(0)}°`;
+    $("s2q2v").textContent = `${(q2 / DEG).toFixed(0)}°`;
+    const pose = fk(q1, q2);
+    const co = Math.cos(pose.phi), si = Math.sin(pose.phi);
+    const phiN = wrap(pose.phi);
+    /** @type {Record<string, number>} */
+    const val = { R11: co, R12: -si, R21: si, R22: co, px: pose.p[0], py: pose.p[1], z1: 0, z2: 0, z3: 1 };
+
+    cells.forEach((row, r) => row.forEach((td, c) => {
+      const k = KEYS[r][c];
+      const name = k.startsWith("z") ? "" : k;
+      td.innerHTML = `<span class="nm">${name}&nbsp;</span>${k.startsWith("z") ? val[k].toFixed(0) : fmt(val[k])}`;
+      td.classList.toggle("sel", k === sel);
+      td.classList.toggle("colhl", COL_OF[k] !== undefined && COL_OF[k] === COL_OF[sel] && k !== sel);
+    }));
+
+    // ---- 図 ----
+    view.clear();
+    drawBaseAxes(view);
+    drawArm(view, pose);
+    const p = pose.p;
+    const ex = /** @type {Vec2} */ ([co, si]), ey = /** @type {Vec2} */ ([-si, co]);
+    if (sel === "R11" || sel === "R21" || sel === "R12" || sel === "R22") {
+      const isX = sel === "R11" || sel === "R21";
+      const axis = isX ? ex : ey;
+      const tip = add(p, mul(axis, UNIT));
+      const ref0 = isX ? 0 : Math.PI / 2;
+      // 角度 φ (ベースの軸 → ツールの軸)
+      view.line(p, add(p, mul(isX ? [1, 0] : [0, 1], UNIT * 1.25)), C.muted, 1.2, [4, 4]);
+      view.arc(p, 30, ref0, ref0 + phiN, C.muted, 1.5);
+      const mid = ref0 + phiN / 2;
+      view.label("φ", add(p, mul([Math.cos(mid), Math.sin(mid)], 44 / view.s)), C.muted, "center", 0, 0, 13);
+      // 影 (成分)
+      const horizontal = sel === "R11" || sel === "R12";
+      const comp = horizontal ? axis[0] : axis[1];
+      const foot = add(p, horizontal ? [comp * UNIT, 0] : [0, comp * UNIT]);
+      view.line(tip, foot, C.rot, 1.5, [3, 3]);
+      view.line(p, foot, C.rot, 6);
+      view.label(`${sel} = ${fmt(comp, 2)}`, foot, C.rot, horizontal ? (comp >= 0 ? "left" : "right") : "left",
+        horizontal ? (comp >= 0 ? 8 : -8) : 10, horizontal ? 14 : 0, 13);
+    } else if (sel === "px" || sel === "py") {
+      const foot = /** @type {Vec2} */ (sel === "px" ? [p[0], 0] : [0, p[1]]);
+      view.line([0, 0], foot, C.pos, 6);
+      view.line(foot, p, C.pos, 1.5, [4, 4]);
+      if (sel === "px") view.label(`px = ${fmt(p[0])} m`, [p[0] / 2, 0], C.pos, "center", 0, 16, 13);
+      else view.label(`py = ${fmt(p[1])} m`, [0, p[1] / 2], C.pos, p[0] >= 0 ? "right" : "left", p[0] >= 0 ? -12 : 12, 0, 13);
+    }
+    drawToolAxes(view, pose, UNIT, "（長さ 1）");
+
+    // ---- 説明 ----
+    const phiDeg = (phiN / DEG).toFixed(0);
+    /** @type {Record<string, string>} */
+    const TEXT = {
+      R11: `<b class="big">R<sub>11</sub> = ${fmt(co)}</b>（1行1列目）<br>赤い矢印（<b>ツールの x 軸</b>＝指先が伸びる向き。長さ 1）を、ベースの <b>x 方向</b>に影を落とした長さです。<br>ツール x 軸とベース x 軸の角度を φ とすると <b>R<sub>11</sub> = cos φ</b>（今 φ = ${phiDeg}°）。<br>1 → 同じ向き　0 → 直角　−1 → 逆向き`,
+      R21: `<b class="big">R<sub>21</sub> = ${fmt(si)}</b>（2行1列目）<br>ツール x 軸（赤）を、ベースの <b>y 方向</b>に影を落とした長さ ＝ <b>sin φ</b>（φ = ${phiDeg}°）。<br>1 列目（R<sub>11</sub>, R<sub>21</sub>）をまとめて読むと「ツール x 軸がベースから見てどちらを向いているか」になります。`,
+      R12: `<b class="big">R<sub>12</sub> = ${fmt(-si)}</b>（1行2列目）<br>ツール y 軸（緑）を、ベースの <b>x 方向</b>に影を落とした長さ ＝ <b>−sin φ</b>。<br>2 列目はツール y 軸の向きを表します。`,
+      R22: `<b class="big">R<sub>22</sub> = ${fmt(co)}</b>（2行2列目）<br>ツール y 軸（緑）を、ベースの <b>y 方向</b>に影を落とした長さ ＝ <b>cos φ</b>。`,
+      px: `<b class="big">p<sub>x</sub> = ${fmt(p[0])} m</b>（1行3列目）<br>ベースの原点から見て、指先が <b>x 方向に ${(p[0] * 1000).toFixed(0)} mm</b> の位置にあることを表します。<br>3 列目（オレンジ）は向きとは関係なく、<b>位置</b>だけです。`,
+      py: `<b class="big">p<sub>y</sub> = ${fmt(p[1])} m</b>（2行3列目）<br>指先が <b>y 方向に ${(p[1] * 1000).toFixed(0)} mm</b> の位置にあることを表します。`,
+    };
+    explain.innerHTML = TEXT[sel] || `<b class="big">最後の行（0 0 1）</b><br>いつも <b>0 0 1</b> です。回転と平行移動を 1 回の掛け算でまとめて計算できるようにするための「飾り」で、ロボットの状態は入っていません。`;
+  });
+})();
+
+// ============================================================================
+// 3. ヤコビアン
+// ============================================================================
+(function sectionJacobian() {
+  const view = new View(/** @type {HTMLCanvasElement} */ ($("cv3")), BOX);
+  views.push(view);
+  const q1In = /** @type {HTMLInputElement} */ ($("s3q1"));
+  const q2In = /** @type {HTMLInputElement} */ ($("s3q2"));
+  const explain = $("exp3");
+  const DQ = 0.35;        // 矢印の縮尺: この角度 [rad] 回したときの動きを描く
+  const AMP = 15 * DEG;   // ゆらす振幅
+  const PERIOD = 2.6;     // ゆらす周期 [s]
+  /** @type {"j1" | "j2" | "none"} */
+  let mode = "j1";
+  /** @type {Vec2[]} */
+  let trail = [];
+  let sel = [0, 0]; // [行, 列]
+
+  const cells = buildMatrix($("mat3"), ["x 速度 [m/rad]", "y 速度 [m/rad]", "向き [rad/rad]"], ["1列目<br>関節1", "2列目<br>関節2"], 3, 2,
+    (_r, c) => (c === 0 ? "c1" : "c2"));
+  cells.forEach((row, r) => row.forEach((td, c) => td.addEventListener("click", () => { sel = [r, c]; })));
+
+  const modeBtns = /** @type {HTMLButtonElement[]} */ ([...document.querySelectorAll("#s3 button[data-mode]")]);
+  /** @param {"j1" | "j2" | "none"} m */
+  const setMode = (m) => {
+    mode = m;
+    trail = [];
+    modeBtns.forEach((b) => b.classList.toggle("on", b.dataset.mode === m));
+    if (m === "j1") sel = [sel[0], 0];
+    if (m === "j2") sel = [sel[0], 1];
+  };
+  modeBtns.forEach((b) => b.addEventListener("click", () => setMode(/** @type {"j1" | "j2" | "none"} */ (b.dataset.mode))));
+  [q1In, q2In].forEach((el) => el.addEventListener("input", () => { trail = []; }));
+  $("s3straight").addEventListener("click", () => { q2In.value = "0"; setMode("none"); });
+
+  frames.push((t) => {
+    const q1 = Number(q1In.value) * DEG, q2 = Number(q2In.value) * DEG;
+    $("s3q1v").textContent = `${(q1 / DEG).toFixed(0)}°`;
+    $("s3q2v").textContent = `${(q2 / DEG).toFixed(0)}°`;
+    const J = jacobian(q1, q2);
+    const pose0 = fk(q1, q2);
+    const wob = AMP * Math.sin((2 * Math.PI * t) / PERIOD);
+    const pose = fk(q1 + (mode === "j1" ? wob : 0), q2 + (mode === "j2" ? wob : 0));
+    if (mode !== "none") {
+      trail.push(pose.p);
+      if (trail.length > 400) trail.shift();
+    }
+
+    cells.forEach((row, r) => row.forEach((td, c) => {
+      td.innerHTML = `<span class="nm">J${r + 1}${c + 1}&nbsp;</span>${fmt(J[r][c])}`;
+      td.classList.toggle("sel", r === sel[0] && c === sel[1]);
+    }));
+
+    // ---- 図 ----
+    view.clear();
+    drawBaseAxes(view);
+    const colColor = [C.j1, C.j2];
+    if (mode !== "none") {
+      drawArm(view, pose0, 0.2);
+      const c = view.ctx;
+      c.save();
+      c.strokeStyle = mode === "j1" ? C.j1 : C.j2; c.lineWidth = 2; c.globalAlpha = 0.7;
+      c.beginPath();
+      trail.forEach((q, k) => { const P = view.px(q); if (k === 0) c.moveTo(P[0], P[1]); else c.lineTo(P[0], P[1]); });
+      c.stroke();
+      c.restore();
+    }
+    drawArm(view, pose);
+    // 回している関節を色で囲む
+    if (mode === "j1") view.dot(pose.j1, 12, "transparent", C.j1, 3);
+    if (mode === "j2") view.dot(pose.j2, 11, "transparent", C.j2, 3);
+
+    const p = pose0.p;
+    for (const i of [0, 1]) {
+      const shown = mode === "none" || (mode === "j1" && i === 0) || (mode === "j2" && i === 1) || sel[1] === i;
+      if (!shown) continue;
+      const joint = i === 0 ? pose0.j1 : pose0.j2;
+      const v = /** @type {Vec2} */ ([J[0][i] * DQ, J[1][i] * DQ]);
+      view.line(joint, p, colColor[i], 1.5, [5, 4]);
+      const lever = sub(joint, p), ll = len(lever), vl = len(v);
+      if (ll > 1e-4 && vl > 1e-4) view.rightAngle(p, mul(lever, 1 / ll), mul(v, 1 / vl), colColor[i]);
+      view.arrow(p, add(p, v), colColor[i], 4);
+      view.label(`関節${i + 1}の列`, add(p, v), colColor[i], "left", 8, -10, 12);
+    }
+    // 選んだマスの成分を強調
+    if (sel[0] < 2) {
+      const i = sel[1];
+      const v = /** @type {Vec2} */ ([J[0][i] * DQ, J[1][i] * DQ]);
+      const foot = add(p, sel[0] === 0 ? [v[0], 0] : [0, v[1]]);
+      view.line(add(p, v), foot, C.ink, 1.2, [3, 3]);
+      view.line(p, foot, C.ink, 5);
+      view.label(`J${sel[0] + 1}${sel[1] + 1}`, foot, C.ink, "left", 8, 12, 12);
+    }
+    view.dot(p, 5, C.tcp);
+
+    // ---- 説明 ----
+    const [r, c] = sel;
+    const v = J[r][c];
+    if (r < 2) {
+      const axis = r === 0 ? "x" : "y";
+      const extra = r === 0 && c === 0
+        ? `<br>関節1 は根元なので指先は円を描いて動き、J<sub>11</sub> ＝ −（指先の y 座標）＝ ${fmt(-p[1])} になります。`
+        : "";
+      explain.innerHTML = `<b class="big">J<sub>${r + 1}${c + 1}</sub> = ${fmt(v)} m/rad</b>（${r + 1}行${c + 1}列目）<br>`
+        + `<b>関節${c + 1}</b>を回したとき、指先が <b>${axis} 方向</b>に動く量です。<br>`
+        + `例：関節${c + 1}を 0.01 rad（約 0.57°）回すと、指先は ${axis} 方向に <b>${fmt(v * 10, 2)} mm</b> 動きます。`
+        + extra
+        + `<br>図の黒い太線は、${c + 1} 列目の矢印を ${axis} 方向に影を落とした長さです。`;
+    } else {
+      explain.innerHTML = `<b class="big">J<sub>3${c + 1}</sub> = 1 rad/rad</b>（3行${c + 1}列目）<br>関節${c + 1}を 1 rad 回すと、指先の<b>向き</b>も 1 rad 回ります。平面のアームではどの関節を回しても同じなので、いつも 1 です（3D では関節の回転軸の向きが入ります）。`;
+    }
+    const det = J[0][0] * J[1][1] - J[0][1] * J[1][0];
+    $("det3").textContent = `${fmt(det, 4)} m²`;
+    $("det3bar").style.width = `${(Math.abs(det) / (L1 * L2)) * 100}%`;
+    $("warn3").classList.toggle("on", Math.abs(Math.sin(q2)) < 0.12);
+  });
+})();
+
+// ============================================================================
+// 4. ヤコビアンで逆運動学
+// ============================================================================
+(function sectionIK() {
+  const canvas = /** @type {HTMLCanvasElement} */ ($("cv4"));
+  const view = new View(canvas, BOX);
+  views.push(view);
+  const autoIn = /** @type {HTMLInputElement} */ ($("s4auto"));
+  const MAX_STEP = 0.003;  // 1 フレームで進む最大距離 [m]
+  const LAMBDA = 0.02;     // 減衰係数 [m]
+  const R_MIN = 0.04, R_MAX = 0.262;
+  let q = [100 * DEG, 70 * DEG];
+  /** @type {Vec2} */
+  let target = [0.05, 0.18];
+  /** @type {Vec2[]} */
+  const trail = [];
+  let dragging = false;
+
+  const jCells = buildMatrix($("ikJ"), [], [], 2, 2, (_r, c) => (c === 0 ? "c1" : "c2"));
+  const dqCells = buildMatrix($("ikDq"), [], [], 2, 1, () => "");
+  const dpCells = buildMatrix($("ikDp"), [], [], 2, 1, () => "pos");
+
+  /** @param {Vec2} p @returns {Vec2} アームが届く範囲に収める */
+  const clampReach = (p) => {
+    const r = len(p);
+    if (r < 1e-6) return [R_MIN, 0];
+    return mul(p, Math.min(Math.max(r, R_MIN), R_MAX) / r);
+  };
+  /** @param {PointerEvent} e */
+  const pick = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    target = clampReach(view.world(e.clientX - rect.left, e.clientY - rect.top));
+  };
+  canvas.addEventListener("pointerdown", (e) => { dragging = true; autoIn.checked = false; canvas.setPointerCapture(e.pointerId); pick(e); });
+  canvas.addEventListener("pointermove", (e) => { if (dragging) pick(e); });
+  canvas.addEventListener("pointerup", () => { dragging = false; });
+  canvas.addEventListener("pointercancel", () => { dragging = false; });
+
+  frames.push((t) => {
+    if (autoIn.checked) target = clampReach([0.02 + 0.11 * Math.sin(t * 0.6), 0.165 + 0.055 * Math.sin(t * 1.2)]);
+    const pose = fk(q[0], q[1]);
+    const e = sub(target, pose.p);
+    const dist = len(e);
+    const dp = dist > MAX_STEP ? mul(e, MAX_STEP / dist) : e;
+    const J = jacobian(q[0], q[1]);
+    // 減衰付き最小二乗: Δq = Jᵀ (J Jᵀ + λ² I)⁻¹ Δp
+    const a = J[0][0] * J[0][0] + J[0][1] * J[0][1] + LAMBDA * LAMBDA;
+    const b = J[0][0] * J[1][0] + J[0][1] * J[1][1];
+    const d = J[1][0] * J[1][0] + J[1][1] * J[1][1] + LAMBDA * LAMBDA;
+    const det = a * d - b * b;
+    const x = [(d * dp[0] - b * dp[1]) / det, (-b * dp[0] + a * dp[1]) / det];
+    const dq = [J[0][0] * x[0] + J[1][0] * x[1], J[0][1] * x[0] + J[1][1] * x[1]];
+    q = [q[0] + dq[0], q[1] + dq[1]];
+    const now = fk(q[0], q[1]);
+    trail.push(now.p);
+    if (trail.length > 240) trail.shift();
+
+    // ---- 表示 ----
+    jCells.forEach((row, r) => row.forEach((td, c) => { td.textContent = fmt(J[r][c]); }));
+    dqCells.forEach((row, r) => { row[0].textContent = fmt(dq[r] / DEG, 2); });
+    dpCells.forEach((row, r) => { row[0].textContent = fmt(dp[r] * 1000, 2); });
+    const F = /** @type {Vec2} */ (dist > 1e-4 ? mul(e, 1 / dist) : [0, 0]);
+    const Jn = jacobian(q[0], q[1]);
+    $("ikF").textContent = `(${fmt(F[0], 2)}, ${fmt(F[1], 2)})`;
+    $("ikT1").textContent = fmt(Jn[0][0] * F[0] + Jn[1][0] * F[1]);
+    $("ikT2").textContent = fmt(Jn[0][1] * F[0] + Jn[1][1] * F[1]);
+
+    view.clear();
+    // 届く範囲
+    const c = view.ctx, O = view.px([0, 0]);
+    c.save();
+    c.strokeStyle = C.muted; c.setLineDash([2, 5]); c.lineWidth = 1;
+    c.beginPath(); c.arc(O[0], O[1], (L1 + L2) * view.s, 0, Math.PI * 2); c.stroke();
+    c.restore();
+    view.label("腕が届く限界", [0, L1 + L2], C.muted, "center", 0, 12, 11);
+    drawBaseAxes(view);
+    c.save();
+    c.strokeStyle = C.tcp; c.lineWidth = 1.5; c.globalAlpha = 0.45;
+    c.beginPath();
+    trail.forEach((p, k) => { const P = view.px(p); if (k === 0) c.moveTo(P[0], P[1]); else c.lineTo(P[0], P[1]); });
+    c.stroke();
+    c.restore();
+    drawArm(view, now);
+    view.line(now.p, target, C.accent, 1.5, [4, 4]);
+    if (dist > 0.004) view.arrow(now.p, add(now.p, mul(F, 0.05)), C.accent, 3);
+    view.dot(target, 11, "transparent", C.accent, 2.5);
+    view.dot(target, 3, C.accent);
+    view.label("目標（ドラッグできます）", target, C.accent, "left", 16, -12, 12);
+  });
+})();
+
+// ============================================================================
+// アニメーションループ
+// ============================================================================
+window.addEventListener("resize", () => views.forEach((v) => v.resize()));
+/** @param {number} ms */
+function loop(ms) {
+  const t = ms / 1000;
+  for (const f of frames) f(t);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
