@@ -195,6 +195,20 @@
   table.cmp { border-collapse: collapse; width: 100%; font-size: 14px; }
   table.cmp th, table.cmp td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
   table.cmp th { color: var(--muted); font-weight: normal; font-size: 13px; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin-top: 16px; }
+  .two .explain { margin-top: 0; }
+  @media (max-width: 700px) { .two { grid-template-columns: minmax(0, 1fr); } }
+  .eqs { font: 12.5px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; margin: 4px 0 6px; padding: 4px 10px; background: var(--panel); border-radius: 6px; overflow-x: auto; white-space: nowrap; }
+  h3 { font-size: 15.5px; margin: 18px 0 6px; }
+  button:disabled { opacity: .5; cursor: default; }
+  table.enc { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  table.enc th, table.enc td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; transition: background .2s; }
+  table.enc th { color: var(--muted); font-weight: normal; font-size: 11.5px; font-family: system-ui, sans-serif; }
+  table.enc th:first-child, table.enc td:first-child { text-align: left; }
+  table.enc td.bad { color: var(--warn); font-weight: 700; }
+  table.enc td.flash { background: var(--posbg); font-weight: 700; }
+  .steps.calib li { transition: color .2s; }
+  .steps.calib li.on { color: var(--accent); font-weight: 700; }
   footer { max-width: 1120px; margin: 0 auto; padding: 4px 16px 30px; color: var(--muted); font-size: 12.5px; }
 </style>
 </head>
@@ -207,7 +221,9 @@
     <a href="#s2">2. 位置と向きの行列 T</a>
     <a href="#s3">3. ヤコビアン J</a>
     <a href="#s4">4. ヤコビアンの使い道</a>
-    <a href="#s5">5. 3D になると</a>
+    <a href="#s4b">4+. ヤコビアンのありがたみ</a>
+    <a href="#s5">5. キャリブレーション</a>
+    <a href="#s6">6. 3D になると</a>
   </nav>
 </header>
 
@@ -336,8 +352,110 @@
   </section>
 
   <!-- ===================================================================== -->
+  <section class="card" id="s4b">
+    <h2><span class="num">4+</span>補足：結局ヤコビアンは何がありがたいの？</h2>
+    <p class="lead">ロボットは<b>関節</b>でしか動かせないのに、人がやりたいことはいつも「<b>指先</b>をこう動かしたい」です。ヤコビアンは、この 2 つの世界を<b>掛け算（連立方程式）だけで</b>行き来できるようにする翻訳表です。具体的な問題を 1 つ解いてみましょう。</p>
+    <div class="demo">
+      <div>
+        <canvas class="view" id="cv4b"></canvas>
+        <div class="ctrl">
+          <span>指先を動かす：</span>
+          <button data-dir="1,0">→ 右</button>
+          <button data-dir="-1,0">← 左</button>
+          <button data-dir="0,1">↑ 上</button>
+          <button data-dir="0,-1">↓ 下</button>
+        </div>
+        <div class="ctrl">
+          <span>動かす量：</span>
+          <button data-size="1" class="on">1 cm</button>
+          <button data-size="3">3 cm</button>
+          <button id="s4bReset">姿勢を戻す</button>
+        </div>
+        <div class="legend">
+          <span><span class="sw" style="background:var(--j1)"></span>関節1 を a だけ回した分の動き</span>
+          <span><span class="sw" style="background:var(--j2)"></span>関節2 を b だけ回した分の動き</span>
+          <span><span class="sw" style="background:var(--accent)"></span>目標</span>
+        </div>
+      </div>
+      <div>
+        <div class="explain" id="exp4b" style="margin-top:0"></div>
+      </div>
+    </div>
+
+    <div class="two">
+      <div class="explain">
+        <b>ヤコビアンを使わない場合</b><br>
+        指先の位置は次の式で決まります。
+        <div class="eqs">x = 0.15·cos θ₁ + 0.12·cos(θ₁+θ₂)<br>y = 0.15·sin θ₁ + 0.12·sin(θ₁+θ₂)</div>
+        「x を 1 cm 増やして、y は変えない」θ₁, θ₂ を、cos と sin の入ったこの式から逆算するのは簡単ではありません。少し回して計算し、ずれていたらまた回す…という<b>手探り</b>になります。
+      </div>
+      <div class="explain">
+        <b>ヤコビアンを使う場合</b><br>
+        「ほんの少しの動き」に限れば、曲がった関係も<b>まっすぐ（比例）</b>とみなせます。J はその比例の係数なので、<b>中学で習う連立方程式</b>を解くだけで答えが出ます（上の計算）。<br>
+        そのかわり、比例とみなせるのは今の姿勢の近くだけです。姿勢が変わったら J を作り直します。これが「行列の値が変動する」理由です。大きく動かすと誤差が出る（3 cm で試してみてください）ので、4 章のように<b>少しずつ繰り返し</b>ます。
+      </div>
+    </div>
+
+    <div class="tip">
+      <b>たとえ：ショベルカー</b><br>
+      ショベルカーには関節ごとにレバーがあります（ブーム・アーム・バケット）。「バケットの先を地面と水平に<b>まっすぐ</b>引きたい」と思っても、レバーは関節ごとにしかありません。そのため、複数のレバーを同時に、刻々と量を変えながら操作する必要があり、熟練の技がいります。<br>
+      ヤコビアンは、この<b>熟練者の頭の中の計算</b>にあたります。「先端をこっちへ」という指示を、各関節をどれだけ回すかに瞬時に翻訳してくれます。
+    </div>
+
+    <h3>ロボットで実際にうれしい場面</h3>
+    <div class="scroll">
+      <table class="cmp">
+        <tr><th>場面</th><th>ヤコビアンがないと</th><th>ヤコビアンがあると</th></tr>
+        <tr><td>ゲームパッドで「右へ」と操作（遠隔操作）</td><td>関節ごとに操作するしかない</td><td>指先の向きで直感的に操作できる</td></tr>
+        <tr><td>パレットをまっすぐ押す（demo7）</td><td>指先が曲がった線を描く</td><td>毎瞬 J⁻¹ で関節を決めるので、一直線に一定の速さで押せる</td></tr>
+        <tr><td>解析的に IK を解けない複雑なロボット</td><td>目標の関節角が求められない</td><td>4 章のように少しずつ近づけば解ける（Isaac Lab の DifferentialIK）</td></tr>
+      </table>
+    </div>
+    <p class="hint">demo7 の SO-101 は形が単純なので、IK を式で直接解いています（解析解）。ヤコビアンの真価が出るのは、関節が多いロボットや、指先の速度や力を扱う場面です。</p>
+  </section>
+
+  <!-- ===================================================================== -->
   <section class="card" id="s5">
-    <h2><span class="num">5</span>3D（実際のロボット）になると</h2>
+    <h2><span class="num">5</span>キャリブレーション ―「コンピュータが思っている角度」を本物に合わせる</h2>
+    <p class="lead">関節のモーターは角度そのものを知っているわけではなく、センサー（エンコーダ）の<b>生の数字</b>（0〜4095 など）を返すだけです。この数字を角度に直すには「この数字のとき 0° だ」という<b>ゼロ点</b>が必要です。ゼロ点を測って記録する作業が<b>キャリブレーション</b>です。ゼロ点がずれていると、関節の角度のずれは小さくても、<b>指先の位置は大きくずれます</b>。</p>
+    <div class="demo">
+      <div>
+        <canvas class="view" id="cv5"></canvas>
+        <div class="ctrl">
+          <button id="s5run">▶ キャリブレーションを実行</button>
+          <button id="s5break">ゼロ点をずらす</button>
+          <label><input type="checkbox" id="s5auto" checked> アームを動かす</label>
+        </div>
+        <div class="ctrl">
+          <label>関節1 のずれ δ₁ <input type="range" id="s5d1" min="-15" max="15" step="any" value="6"><span class="val" id="s5d1v"></span></label>
+          <label>関節2 のずれ δ₂ <input type="range" id="s5d2" min="-15" max="15" step="any" value="-8"><span class="val" id="s5d2v"></span></label>
+        </div>
+        <div class="legend">
+          <span><span class="sw" style="background:var(--link)"></span>本当のアーム</span>
+          <span><span class="sw" style="background:var(--accent)"></span>コンピュータが思っているアーム</span>
+          <span><span class="sw" style="background:var(--j1)"></span>J·δ（ヤコビアンで予測したずれ）</span>
+        </div>
+      </div>
+      <div>
+        <div class="scroll"><table class="enc mono" id="enc5"></table></div>
+        <p class="hint">計算した角度 ＝（生の値 − ゼロ点）× 360° ÷ 4096。記録したゼロ点が δ ぶんずれていると、計算した角度もそのまま δ ずれます。</p>
+        <div class="explain" id="exp5"></div>
+        <ol class="steps calib" id="steps5">
+          <li>アームを決まった<b>基準姿勢</b>に合わせる（治具や目印に当てる）</li>
+          <li>そのときの<b>生の値</b>を読む</li>
+          <li>「この生の値 ＝ 基準姿勢の角度」となるように<b>ゼロ点を記録</b>する</li>
+        </ol>
+      </div>
+    </div>
+    <div class="tip">
+      <b>実際のロボットでは</b>：LeRobot の SO-101 では、キャリブレーション用のコマンドを実行して、① アームを可動範囲の真ん中の姿勢にして記録し、② 各関節を端から端まで動かして可動範囲（最小値・最大値）を記録します。こうしてゼロ点と範囲をファイルに保存します。<br>
+      <b>ほかのキャリブレーション</b>：カメラのレンズのゆがみや焦点距離を求める「カメラキャリブレーション」、カメラとロボットの位置関係を求める「ハンドアイキャリブレーション」などもあります。どれも<b>コンピュータの中の数字と現実を一致させる</b>ための作業です。
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section class="card" id="s6">
+    <h2><span class="num">6</span>3D（実際のロボット）になると</h2>
     <p class="lead">考え方はまったく同じで、軸が 1 本（z）増えるぶん行列が大きくなるだけです。</p>
     <div class="scroll">
       <table class="cmp">
@@ -554,15 +672,15 @@ class View {
   }
 }
 
-/** @param {View} v @param {ArmPose} pose @param {number} [alpha] */
-function drawArm(v, pose, alpha = 1) {
+/** @param {View} v @param {ArmPose} pose @param {number} [alpha] @param {string} [color] リンクの色 */
+function drawArm(v, pose, alpha = 1, color = C.link) {
   const c = v.ctx;
   c.save();
   c.globalAlpha = alpha;
   const B = v.px([0, 0]);
   c.fillStyle = C.link;
   c.fillRect(B[0] - 20, B[1] + 8, 40, 9);
-  c.strokeStyle = C.link; c.lineWidth = 12; c.lineCap = "round"; c.lineJoin = "round";
+  c.strokeStyle = color; c.lineWidth = 12; c.lineCap = "round"; c.lineJoin = "round";
   const P0 = v.px(pose.j1), P1 = v.px(pose.j2), P2 = v.px(pose.p);
   c.beginPath(); c.moveTo(P0[0], P0[1]); c.lineTo(P1[0], P1[1]); c.lineTo(P2[0], P2[1]); c.stroke();
   v.dot(pose.j1, 8, C.panel, C.ink);
@@ -1023,6 +1141,246 @@ const frames = [];
     view.dot(target, 11, "transparent", C.accent, 2.5);
     view.dot(target, 3, C.accent);
     view.label("目標（ドラッグできます）", target, C.accent, "left", 16, -12, 12);
+  });
+})();
+
+// ============================================================================
+// 4+. ヤコビアンのありがたみ: 「指先を 1 cm 動かす」を連立方程式で解く
+// ============================================================================
+(function sectionWhyJacobian() {
+  const view = new View(/** @type {HTMLCanvasElement} */ ($("cv4b")), { xmin: -0.20, xmax: 0.20, ymin: -0.03, ymax: 0.27 });
+  views.push(view);
+  const explain = $("exp4b");
+  const Q0 = [60 * DEG, 70 * DEG]; // 3 章の初期姿勢と同じ [rad]
+  const MOVE_S = 0.8;              // 関節を回すアニメーションの時間 [s]
+  /** @type {Record<string, string>} */
+  const DIR_NAME = { "1,0": "右", "-1,0": "左", "0,1": "上", "0,-1": "下" };
+  /**
+   * @typedef {{ key: string, dp: Vec2, q0: number[], p0: Vec2, J: number[][],
+   *             dq: number[] | null, start: number, moved: Vec2 | null }} Move
+   */
+  let q = Q0.slice();
+  let dist = 0.01; // [m]
+  let now = 0;
+  /** @type {Vec2[]} */
+  let trail = [];
+
+  /**
+   * 今の姿勢の J で「J × (a, b) = Δp」を解く。
+   * @param {string} key 方向 ("1,0" など)
+   * @param {boolean} run true なら実際に関節を回す
+   * @returns {Move}
+   */
+  function plan(key, run) {
+    const [dx, dy] = key.split(",").map(Number);
+    const J = jacobian(q[0], q[1]);
+    const dp = /** @type {Vec2} */ ([dx * dist, dy * dist]);
+    const det = J[0][0] * J[1][1] - J[0][1] * J[1][0];
+    const dq = Math.abs(det) < 1e-4 ? null
+      : [(dp[0] * J[1][1] - J[0][1] * dp[1]) / det, (J[0][0] * dp[1] - J[1][0] * dp[0]) / det];
+    const p0 = fk(q[0], q[1]).p;
+    if (run) trail = [p0];
+    return { key, dp, q0: q.slice(), p0, J, dq, start: run && dq ? now : -1, moved: null };
+  }
+  /** @type {Move} */
+  let move = plan("1,0", false);
+
+  document.querySelectorAll("#s4b button[data-dir]").forEach((b) => b.addEventListener("click", () => {
+    move = plan(/** @type {HTMLButtonElement} */ (b).dataset.dir || "1,0", true);
+  }));
+  const sizeBtns = /** @type {HTMLButtonElement[]} */ ([...document.querySelectorAll("#s4b button[data-size]")]);
+  sizeBtns.forEach((b) => b.addEventListener("click", () => {
+    dist = Number(b.dataset.size) / 100;
+    sizeBtns.forEach((x) => x.classList.toggle("on", x === b));
+    if (move.start < 0 || move.moved) move = plan(move.key, false);
+  }));
+  $("s4bReset").addEventListener("click", () => { q = Q0.slice(); trail = []; move = plan("1,0", false); });
+
+  frames.push((t) => {
+    now = t;
+    if (move.dq && move.start >= 0 && !move.moved) {
+      const s = Math.min(1, (t - move.start) / MOVE_S);
+      const e = s * s * (3 - 2 * s);
+      q = [move.q0[0] + move.dq[0] * e, move.q0[1] + move.dq[1] * e];
+      const p = fk(q[0], q[1]).p;
+      trail.push(p);
+      if (s >= 1) move.moved = sub(p, move.p0);
+    }
+
+    // ---- 図 ----
+    const J = move.J, dq = move.dq;
+    const target = add(move.p0, move.dp);
+    view.clear();
+    drawBaseAxes(view);
+    if (move.start >= 0) drawArm(view, fk(move.q0[0], move.q0[1]), 0.22);
+    const c = view.ctx;
+    c.save();
+    c.strokeStyle = C.tcp; c.lineWidth = 2;
+    c.beginPath();
+    trail.forEach((p, k) => { const P = view.px(p); if (k === 0) c.moveTo(P[0], P[1]); else c.lineTo(P[0], P[1]); });
+    c.stroke();
+    c.restore();
+    drawArm(view, fk(q[0], q[1]));
+    if (dq) {
+      // Δp = a × (1 列目) + b × (2 列目)
+      const mid = add(move.p0, mul([J[0][0], J[1][0]], dq[0]));
+      view.arrow(move.p0, mid, C.j1, 3);
+      view.arrow(mid, add(mid, mul([J[0][1], J[1][1]], dq[1])), C.j2, 3);
+    }
+    view.dot(target, 7, "transparent", C.accent, 2);
+    view.label(`目標（${DIR_NAME[move.key]}へ ${(len(move.dp) * 100).toFixed(0)} cm）`,
+      target, C.accent, move.dp[0] < 0 ? "right" : "left", move.dp[0] < 0 ? -12 : 12, -12, 12);
+
+    // ---- 説明 ----
+    /** @param {number} v */
+    const term = (v) => (v >= 0 ? "+ " : "− ") + Math.abs(v).toFixed(3);
+    let html = `<b class="big">問題：指先を${DIR_NAME[move.key]}に ${(len(move.dp) * 100).toFixed(0)} cm 動かしたい</b><br>`
+      + `今の姿勢（θ₁ = ${(move.q0[0] / DEG).toFixed(1)}°, θ₂ = ${(move.q0[1] / DEG).toFixed(1)}°）の J は`
+      + `<div class="eqs">[ ${fmt(J[0][0])}  ${fmt(J[0][1])} ]<br>[ ${fmt(J[1][0])}  ${fmt(J[1][1])} ]</div>`
+      + `関節1 を a、関節2 を b [rad] 回すと、指先は J × (a, b) だけ動くので：`
+      + `<div class="eqs">${fmt(J[0][0])}·a ${term(J[0][1])}·b = ${fmt(move.dp[0])}　（x 方向）<br>`
+      + `${fmt(J[1][0])}·a ${term(J[1][1])}·b = ${fmt(move.dp[1])}　（y 方向）</div>`;
+    if (!dq) {
+      html += `<span style="color:var(--warn)">特異点なので解けません。「姿勢を戻す」を押してください。</span>`;
+    } else {
+      html += `連立方程式を解くと：<div class="eqs"><b>a = ${fmt(dq[0], 4)} rad ≒ ${fmt(dq[0] / DEG, 2)}°</b>（関節1）<br>`
+        + `<b>b = ${fmt(dq[1], 4)} rad ≒ ${fmt(dq[1] / DEG, 2)}°</b>（関節2）</div>`;
+      if (move.moved) {
+        const errMm = len(sub(move.moved, move.dp)) * 1000;
+        html += `実際に回した結果、指先は x に <b>${fmt(move.moved[0] * 1000, 2)} mm</b>、y に <b>${fmt(move.moved[1] * 1000, 2)} mm</b> 動きました。`
+          + (errMm > 0.3
+            ? `目標とのずれは ${errMm.toFixed(2)} mm です（比例とみなした近似の誤差。大きく動かすほど増えます）。`
+            : `ほぼぴったりです。`)
+          + `<br>続けてボタンを押すと、新しい姿勢で J を作り直して計算します。`;
+      } else {
+        html += move.start >= 0 ? `関節を回しています…` : `左のボタンを押すと、この角度だけ実際に関節を回します。`;
+      }
+    }
+    explain.innerHTML = html;
+  });
+})();
+
+// ============================================================================
+// 5. キャリブレーション (関節のゼロ点合わせ)
+// ============================================================================
+(function sectionCalibration() {
+  const view = new View(/** @type {HTMLCanvasElement} */ ($("cv5")), BOX);
+  views.push(view);
+  const dIn = [/** @type {HTMLInputElement} */ ($("s5d1")), /** @type {HTMLInputElement} */ ($("s5d2"))];
+  const autoIn = /** @type {HTMLInputElement} */ ($("s5auto"));
+  const runBtn = /** @type {HTMLButtonElement} */ ($("s5run"));
+  const explain = $("exp5");
+  const steps = [...$("steps5").children];
+  const COUNTS = 4096;                  // エンコーダ 1 回転のカウント数
+  const K = COUNTS / (2 * Math.PI);     // [count/rad]
+  const OFFSET_TRUE = [1100, 2050];     // 本当のゼロ点 [count]
+  const REF = [90 * DEG, 0];            // 基準姿勢 (真上にまっすぐ) [rad]
+  const PH_END = [1.6, 2.8, 4.0, 5.2];  // 各フェーズの終わり [s]: 基準姿勢へ / 生の値を読む / 記録 / 完了表示
+  /** @typedef {{ start: number, d0: number[] }} CalibRun */
+  /** @type {CalibRun | null} */
+  let run = null;
+  let startRequested = false;
+  let qNow = [90 * DEG, 40 * DEG];
+  let lastT = 0;
+
+  const table = /** @type {HTMLTableElement} */ ($("enc5"));
+  table.innerHTML = "<tr><th>関節</th><th>生の値</th><th>記録した<br>ゼロ点</th><th>計算した<br>角度</th><th>本当の<br>角度</th><th>ずれ δ</th></tr>";
+  /** @type {HTMLTableCellElement[][]} */
+  const cells = [];
+  for (let i = 0; i < 2; i++) {
+    const tr = document.createElement("tr");
+    /** @type {HTMLTableCellElement[]} */
+    const row = [];
+    for (let c = 0; c < 6; c++) { const td = document.createElement("td"); tr.appendChild(td); row.push(td); }
+    row[0].textContent = `関節${i + 1}`;
+    table.appendChild(tr);
+    cells.push(row);
+  }
+
+  runBtn.addEventListener("click", () => { startRequested = true; });
+  $("s5break").addEventListener("click", () => {
+    run = null;
+    dIn.forEach((el) => { el.value = String((Math.random() < 0.5 ? -1 : 1) * (4 + Math.random() * 10)); });
+  });
+
+  frames.push((t) => {
+    const dt = Math.min(Math.max(t - lastT, 0), 0.1);
+    lastT = t;
+    if (startRequested) { run = { start: t, d0: dIn.map((el) => Number(el.value)) }; startRequested = false; }
+    let phase = -1; // 0: 基準姿勢へ, 1: 生の値を読む, 2: ゼロ点を記録, 3: 完了
+    if (run) {
+      const el = t - run.start;
+      phase = PH_END.findIndex((end) => el < end);
+      if (phase === 2) {
+        const s = (el - PH_END[1]) / (PH_END[2] - PH_END[1]);
+        const d0 = run.d0;
+        dIn.forEach((inp, i) => { inp.value = String(d0[i] * (1 - s)); });
+      }
+      if (phase === 3) dIn.forEach((inp) => { inp.value = "0"; });
+      if (phase === -1) run = null;
+    }
+    const goal = phase >= 0 ? REF
+      : autoIn.checked ? [(90 + 40 * Math.sin(0.4 * t)) * DEG, 60 * Math.sin(0.55 * t + 1) * DEG]
+      : qNow;
+    const k = Math.min(1, dt * 4);
+    qNow = [qNow[0] + (goal[0] - qNow[0]) * k, qNow[1] + (goal[1] - qNow[1]) * k];
+
+    const d = dIn.map((el) => Number(el.value) * DEG);
+    $("s5d1v").textContent = `${fmt(d[0] / DEG, 1)}°`;
+    $("s5d2v").textContent = `${fmt(d[1] / DEG, 1)}°`;
+    const poseT = fk(qNow[0], qNow[1]);
+    const poseB = fk(qNow[0] + d[0], qNow[1] + d[1]);
+    const J = jacobian(qNow[0], qNow[1]);
+    const pred = /** @type {Vec2} */ ([J[0][0] * d[0] + J[0][1] * d[1], J[1][0] * d[0] + J[1][1] * d[1]]);
+    const errMm = len(sub(poseB.p, poseT.p)) * 1000;
+    const predMm = len(pred) * 1000;
+
+    // ---- エンコーダの表 ----
+    for (let i = 0; i < 2; i++) {
+      const raw = Math.round(OFFSET_TRUE[i] + qNow[i] * K);
+      const stored = Math.round(OFFSET_TRUE[i] - d[i] * K);
+      const row = cells[i];
+      row[1].textContent = String(raw);
+      row[2].textContent = String(stored);
+      row[3].textContent = `${((raw - stored) / K / DEG).toFixed(1)}°`;
+      row[4].textContent = `${(qNow[i] / DEG).toFixed(1)}°`;
+      row[5].textContent = `${fmt(d[i] / DEG, 1)}°`;
+      row[3].classList.toggle("bad", Math.abs(d[i] / DEG) > 0.3);
+      row[5].classList.toggle("bad", Math.abs(d[i] / DEG) > 0.3);
+      row[1].classList.toggle("flash", phase === 1);
+      row[2].classList.toggle("flash", phase === 2);
+    }
+    steps.forEach((li, n) => li.classList.toggle("on", n === phase));
+    runBtn.disabled = phase >= 0;
+
+    // ---- 図 ----
+    view.clear();
+    drawBaseAxes(view);
+    if (phase >= 0 && phase <= 2) {
+      view.line([0, 0], [0, L1 + L2 + 0.015], C.muted, 1.5, [6, 4]);
+      view.label("基準姿勢（治具）", [0, L1 + L2 + 0.015], C.muted, "left", 8, 0, 12);
+    }
+    const off = errMm > 0.3;
+    // 2 つの指先ラベルが重ならないよう、左右に振り分ける
+    const bRight = poseB.p[0] >= poseT.p[0];
+    if (off) drawArm(view, poseB, 0.4, C.accent);
+    drawArm(view, poseT);
+    if (off) {
+      view.line(poseT.p, poseB.p, C.accent, 1.5, [3, 3]);
+      view.dot(poseB.p, 5, C.accent);
+      view.label("思っている指先", poseB.p, C.accent, bRight ? "left" : "right", bRight ? 10 : -10, 12, 12);
+      view.arrow(poseT.p, add(poseT.p, pred), C.j1, 2.5);
+    }
+    view.label("本当の指先", poseT.p, C.ink, off && bRight ? "right" : "left", off && bRight ? -10 : 10, -12, 12);
+    if (phase === 3) view.label("キャリブレーション完了 ✓", [BOX.xmin, BOX.ymax], C.accent, "left", 12, 16, 14);
+
+    // ---- 説明 ----
+    const r = len(poseT.p) * 1000;
+    explain.innerHTML = !off
+      ? `<b class="big">ずれなし ✓</b><br>計算した角度と本当の角度が一致しているので、順運動学（2 章の T）で計算した指先の位置も現実と一致します。<br>「ゼロ点をずらす」を押すと、ずれた状態を試せます。`
+      : `<b class="big">指先のずれ ${errMm.toFixed(1)} mm</b><br>関節のずれは δ₁ = ${fmt(d[0] / DEG, 1)}°、δ₂ = ${fmt(d[1] / DEG, 1)}° だけなのに、指先はこれだけずれます。<br>`
+        + `このずれは 3 章のヤコビアンを使って <b>Δp ≈ J · δ</b>（紫の矢印：${predMm.toFixed(1)} mm）と予測できます。δ が小さいほど予測はよく合います。<br>`
+        + `例えば根元の関節1 が 1° ずれると、指先までの距離 ${r.toFixed(0)} mm × 0.0175 ≈ <b>${(r * DEG).toFixed(1)} mm</b> ずれます。根元に近い関節ほど、ずれが大きく効きます。`;
   });
 })();
 
