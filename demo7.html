@@ -1,0 +1,1144 @@
+<!doctype html>
+<!--
+  demo7.py (SO-101 でずれたパレットを突いて位置決め枠に戻すデモ) の 1 回分の押し動作を
+  ブラウザ上で再現するビューア。
+
+  * 定数・判断ロジック (measure / plan_push / push_should_stop / 状態遷移) は demo7.py をそのまま移植。
+  * アームは 5 軸の簡略モデル (リンク長は概略値) で、IK は解析解。サーボ遅れは一次遅れ (0.1 s) で近似。
+  * パレットの動きは Isaac Sim の剛体シミュレーションではなく、準静的押し (楕円リミットサーフェス近似)。
+
+  外部ライブラリ: three.js r128 (https://github.com/mrdoob/three.js, MIT License) を CDN から読み込み。
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pallet Nudge Viewer</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --ink: #1b1f24;
+    --muted: #5d6670;
+    --line: #dde1e6;
+    --chip: #eef0f3;
+    --accent: #c2410c;
+    --rot: #e9eefc;
+    --tr: #fdf0e1;
+    --scene-bg: #e6e9ee;
+    --grid: #d3d8de;
+    --plan: #e8590c;
+    --err: #7c3aed;
+    --pallet: #2f5fb8;
+    --tape: #e0b000;
+    --tcp: #d6336c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111418;
+      --panel: #181c21;
+      --ink: #e6e9ed;
+      --muted: #9aa3ad;
+      --line: #2a3038;
+      --chip: #232a32;
+      --accent: #fb923c;
+      --rot: #1e2542;
+      --tr: #3a2717;
+      --scene-bg: #1a1e24;
+      --grid: #2c333c;
+      --plan: #ff8a3d;
+      --err: #a78bfa;
+      --pallet: #5b8def;
+      --tape: #f2c200;
+      --tcp: #f06595;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111418;
+    --panel: #181c21;
+    --ink: #e6e9ed;
+    --muted: #9aa3ad;
+    --line: #2a3038;
+    --chip: #232a32;
+    --accent: #fb923c;
+    --rot: #1e2542;
+    --tr: #3a2717;
+    --scene-bg: #1a1e24;
+    --grid: #2c333c;
+    --plan: #ff8a3d;
+    --err: #a78bfa;
+    --pallet: #5b8def;
+    --tape: #f2c200;
+    --tcp: #f06595;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.5 system-ui, "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+  }
+  header { max-width: 1520px; margin: 0 auto; padding: 14px 16px 0; }
+  header h1 { font-size: 18px; margin: 0 0 2px; }
+  header p { margin: 0; color: var(--muted); font-size: 12.5px; }
+  .app {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 470px;
+    gap: 12px;
+    padding: 12px 16px 24px;
+    max-width: 1520px;
+    margin: 0 auto;
+  }
+  @media (max-width: 1000px) { .app { grid-template-columns: minmax(0, 1fr); } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  .viewport {
+    position: relative;
+    height: min(62vh, 580px);
+    min-height: 340px;
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--scene-bg);
+    border: 1px solid var(--line);
+    touch-action: none;
+  }
+  .viewport canvas.three { display: block; width: 100%; height: 100%; cursor: grab; }
+  .topview {
+    position: absolute; left: 10px; bottom: 10px;
+    width: 230px; height: 230px;
+    border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel);
+  }
+  @media (max-width: 600px) { .topview { width: 150px; height: 150px; } }
+  .hud {
+    position: absolute; right: 10px; top: 10px;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 999px; padding: 3px 10px; font-size: 12.5px;
+  }
+  .lamp { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .viewbtns { position: absolute; left: 10px; top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+  button, select, input {
+    font: inherit; color: var(--ink); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; min-width: 74px; }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; margin-top: 10px; }
+  .controls input[type=range] { flex: 1 1 200px; min-width: 120px; padding: 0; accent-color: var(--accent); }
+  .tlabel { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12.5px; min-width: 120px; }
+  .params { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 8px 12px; margin-top: 10px; font-size: 12.5px; }
+  .params label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+  .params input { width: 70px; padding: 2px 6px; }
+  .log {
+    margin-top: 10px; padding: 8px 12px; max-height: 220px; overflow: auto;
+    font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+  .log div { white-space: pre-wrap; }
+  .log .future { opacity: 0.28; }
+  .log .tag { color: var(--accent); }
+  .side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .sec { padding: 10px 12px; min-width: 0; }
+  .sec h2 { font-size: 13.5px; margin: 0 0 6px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .sec h2 small { color: var(--muted); font-weight: normal; font-size: 11.5px; }
+  .note { color: var(--muted); font-size: 11.5px; margin: 4px 0 0; }
+  .scroll { overflow-x: auto; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
+  .mrow { display: flex; align-items: center; gap: 8px; margin: 4px 0; flex-wrap: nowrap; }
+  .mlabel { font-size: 12.5px; white-space: nowrap; min-width: 62px; }
+  .mat { display: inline-block; position: relative; padding: 2px 7px; }
+  .mat::before, .mat::after {
+    content: ""; position: absolute; top: 0; bottom: 0; width: 5px;
+    border: 1.5px solid var(--ink);
+  }
+  .mat::before { left: 0; border-right: none; }
+  .mat::after { right: 0; border-left: none; }
+  table.m { border-collapse: collapse; font: 12px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
+  table.m td { padding: 1px 5px; text-align: right; white-space: pre; }
+  table.m td.r { background: var(--rot); }
+  table.m td.t { background: var(--tr); }
+  table.m th { font-weight: normal; color: var(--muted); font-size: 11px; padding: 0 5px; text-align: right; white-space: nowrap; }
+  table.m th.rl { text-align: left; }
+  table.jt { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.jt th, table.jt td { padding: 2px 6px; border-bottom: 1px solid var(--line); text-align: right; }
+  table.jt th:first-child, table.jt td:first-child { text-align: left; }
+  table.jt th { color: var(--muted); font-weight: normal; font-size: 11.5px; }
+  .seg { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+  .seg button { padding: 1px 8px; font-size: 12px; }
+  .seg button.on { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 12.5px; }
+  .kv span:nth-child(odd) { color: var(--muted); }
+  .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 3px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SO-101 パレット位置ずれ復旧 — 1 回分の押し動作</h1>
+  <p>demo7.py のロジック (計測 → 押し方決定 → 押す → 後退 → 再計測) を移植。アームは 5 軸の簡略モデル、パレットは準静的押しモデルで近似しています。</p>
+</header>
+
+<div class="app">
+  <main style="min-width:0">
+    <div class="viewport" id="viewport">
+      <canvas class="topview" id="topview"></canvas>
+      <div class="viewbtns">
+        <button id="viewReset">斜め視点</button>
+        <button id="viewTop">真上</button>
+        <button id="axesToggle">関節座標系: 表示</button>
+      </div>
+      <div class="hud">
+        <span class="chip"><span class="lamp" id="lampDot"></span><span id="lampText">ライン停止</span></span>
+        <span class="chip" id="phaseChip">計測</span>
+      </div>
+    </div>
+
+    <div class="card controls">
+      <button class="primary" id="playBtn">⏸ 停止</button>
+      <button id="restartBtn">⟲ 最初から</button>
+      <select id="speedSel" aria-label="再生速度">
+        <option value="0.25">×0.25</option>
+        <option value="0.5">×0.5</option>
+        <option value="1" selected>×1</option>
+        <option value="2">×2</option>
+      </select>
+      <input type="range" id="timeline" min="0" max="0" value="0" aria-label="タイムライン">
+      <span class="tlabel" id="tlabel">t = 0.00 s</span>
+    </div>
+
+    <div class="card params">
+      <strong style="font-size:12.5px">初期ずれ</strong>
+      <label>offset_x <input type="number" id="pX" value="-15" step="1"> mm</label>
+      <label>offset_y <input type="number" id="pY" value="22" step="1"> mm</label>
+      <label>offset_yaw <input type="number" id="pYaw" value="14" step="1"> deg</label>
+      <button id="resimBtn">再計算</button>
+    </div>
+
+    <div class="card log" id="log"></div>
+  </main>
+
+  <aside class="side">
+    <section class="card sec">
+      <h2>関節角ベクトル q <small>[deg]（括弧内 [rad]）</small></h2>
+      <table class="jt mono" id="jointTable"></table>
+      <p class="note">目標 = IK の出力、実際 = サーボ一次遅れ (τ = 0.1 s) 後の値。gripper は閉じたまま 0 rad。</p>
+    </section>
+
+    <section class="card sec">
+      <h2>順運動学 T<sub>0</sub><sup>TCP</sup> <small>ベース座標系 → ツール点 [m]</small></h2>
+      <div class="scroll" id="matTcp"></div>
+      <div class="legend"><span><span class="sw" style="background:var(--rot)"></span>回転 R (3×3)</span><span><span class="sw" style="background:var(--tr)"></span>位置 p [m]</span></div>
+    </section>
+
+    <section class="card sec">
+      <h2>関節ごとの同次変換 <small>T<sub>i-1</sub><sup>i</sup> と累積 T<sub>0</sub><sup>i</sup></small></h2>
+      <div class="seg" id="jointSeg"></div>
+      <div class="scroll" id="matJoint"></div>
+      <p class="note" id="jointNote"></p>
+    </section>
+
+    <section class="card sec">
+      <h2>ヤコビアン J (6×5) <small>ṗ = J<sub>v</sub> q̇, ω = J<sub>ω</sub> q̇</small></h2>
+      <div class="scroll" id="matJac"></div>
+      <p class="note">上 3 行 [m/rad]、下 3 行 [rad/rad]。wrist_roll はツール軸まわりの回転なので位置の列が 0 になります。</p>
+    </section>
+
+    <section class="card sec">
+      <h2>パレット姿勢 T<sub>W</sub><sup>P</sup> <small>ワールド座標系 [m]</small></h2>
+      <div class="scroll" id="matPallet"></div>
+      <h2 style="margin-top:8px">パレット 4 隅の座標 <small>ワールド (x, y) [mm]</small></h2>
+      <div class="scroll" id="matCorners"></div>
+    </section>
+
+    <section class="card sec">
+      <h2>ずれ・計画のベクトル <small>[mm] / [deg]</small></h2>
+      <div class="scroll" id="vecs"></div>
+    </section>
+  </aside>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+"use strict";
+
+// ============================================================================
+// demo7.py の定数
+// ============================================================================
+const DEG = Math.PI / 180;
+const DT = 1 / 120;                        // PHYSICS_RATE = 120 Hz
+const SERVO_LAG_S = 0.1;
+const TABLE_SIZE = [0.70, 0.60, 0.40];
+const TABLE_CENTER_XY = [0.15, 0.0];
+const TABLE_TOP = TABLE_SIZE[2];
+const PALLET_SIZE = [0.08, 0.06, 0.03];
+const HALF = [PALLET_SIZE[0] / 2, PALLET_SIZE[1] / 2];
+const FRAME_CENTER_XY = [0.22, 0.0];
+const FRAME_YAW = 90 * DEG;
+const FRAME_CLEARANCE = 0.005;
+const FRAME_LINE_WIDTH = 0.005;
+const LAMP_POS = [0.30, -0.20, TABLE_TOP + 0.14];
+const PUSH_SPEED = 0.012;
+const PUSH_HEIGHT = 0.017;
+const TRAVEL_HEIGHT = 0.085;
+const HOME_OFFSET = [-0.06, 0.0, 0.13];
+const FINGER_TIP_HALF = 0.010;
+const STANDOFF = 0.035;
+const APPROACH_SPEED = 0.03;
+const SLOWDOWN_BEFORE_FACE = 0.008;
+const CONTACT_SEARCH = STANDOFF + 0.012;
+const CONTACT_MOVE = 0.0005;
+const CONTACT_TURN_DEG = 0.2;
+const BACKOFF = 0.015;
+const TRAVEL_SPEED = 0.08;
+const DESCEND_SPEED = 0.04;
+const ROT_LEVER_FRACTION = 0.75;
+const POS_TOL = 0.0025;
+const YAW_TOL_DEG = 1.5;
+const DONE_MARGIN = 0.0015;
+const REACH_MIN = 0.11;
+const REACH_MAX = 0.30;
+const INSPECT_S = 0.4;
+const FINAL_HOLD_S = 1.5;
+const HOME_TCP_W = [FRAME_CENTER_XY[0] + HOME_OFFSET[0], FRAME_CENTER_XY[1] + HOME_OFFSET[1], TABLE_TOP + HOME_OFFSET[2]];
+const SHOULDER_XY_W = [0.0, 0.0];
+
+// ============================================================================
+// 簡略化した 5 軸アーム (SO-101 相当)
+//   T01 = Trans(0,0,H0)·Rz(q1)   shoulder_pan
+//   T12 = Ry(-q2)                shoulder_lift (上向き正)
+//   T23 = Trans(L1,0,0)·Ry(-q3)  elbow_flex   (上向き正)
+//   T34 = Trans(L2,0,0)·Ry(-q4)  wrist_flex   (上向き正)
+//   T45 = Rx(q5)                 wrist_roll   (ツール軸まわり)
+//   T5T = Trans(L3,0,0)          ツール点 (TCP)
+// ============================================================================
+const H0 = 0.10, L1 = 0.15, L2 = 0.16, L3 = 0.12;
+const JOINT_NAMES = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"];
+const FRAME_NAMES = ["T₀¹ shoulder_pan", "T₁² shoulder_lift", "T₂³ elbow_flex", "T₃⁴ wrist_flex", "T₄⁵ wrist_roll", "T₅ᵀᶜᴾ tool"];
+const FRAME_NOTES = [
+  "Trans(0, 0, H0=0.10)·Rz(q₁) — 根元の旋回 (ワールド +z 軸まわり)",
+  "Ry(−q₂) — 肩の上下 (局所 y 軸まわり、上向き正)",
+  "Trans(L1=0.15, 0, 0)·Ry(−q₃) — 上腕の先で肘を曲げる",
+  "Trans(L2=0.16, 0, 0)·Ry(−q₄) — 前腕の先で手首を曲げる (q₂+q₃+q₄ = −90° でツール真下向き)",
+  "Rx(q₅) — ツール軸 (局所 x) まわりのロール",
+  "Trans(L3=0.12, 0, 0) — 手首からツール点 (閉じた爪の指先 12 mm 上) まで",
+];
+
+const M4 = {
+  id: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+  mul(a, b) {
+    const o = new Array(16).fill(0);
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+      let s = 0;
+      for (let k = 0; k < 4; k++) s += a[i * 4 + k] * b[k * 4 + j];
+      o[i * 4 + j] = s;
+    }
+    return o;
+  },
+  tr: (x, y, z) => [1, 0, 0, x, 0, 1, 0, y, 0, 0, 1, z, 0, 0, 0, 1],
+  rz(a) { const c = Math.cos(a), s = Math.sin(a); return [c, -s, 0, 0, s, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]; },
+  ry(a) { const c = Math.cos(a), s = Math.sin(a); return [c, 0, s, 0, 0, 1, 0, 0, -s, 0, c, 0, 0, 0, 0, 1]; },
+  rx(a) { const c = Math.cos(a), s = Math.sin(a); return [1, 0, 0, 0, 0, c, -s, 0, 0, s, c, 0, 0, 0, 0, 1]; },
+  rows: (T) => [T.slice(0, 4), T.slice(4, 8), T.slice(8, 12), T.slice(12, 16)],
+};
+const col3 = (T, j) => [T[j], T[4 + j], T[8 + j]];
+const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const add3 = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const scale3 = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
+const norm3 = (a) => Math.hypot(a[0], a[1], a[2]);
+const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const neg3 = (a) => [-a[0], -a[1], -a[2]];
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+function jointTransforms(q) {
+  return [
+    M4.mul(M4.tr(0, 0, H0), M4.rz(q[0])),
+    M4.ry(-q[1]),
+    M4.mul(M4.tr(L1, 0, 0), M4.ry(-q[2])),
+    M4.mul(M4.tr(L2, 0, 0), M4.ry(-q[3])),
+    M4.rx(q[4]),
+    M4.tr(L3, 0, 0),
+  ];
+}
+
+/** Returns local transforms T_{i-1}^i and cumulative T_0^i (cum[5] = T_0^TCP), base frame. */
+function fk(q) {
+  const loc = jointTransforms(q);
+  const cum = [];
+  let T = M4.id();
+  for (const A of loc) { T = M4.mul(T, A); cum.push(T); }
+  return { loc, cum };
+}
+
+/** Geometric Jacobian (6x5) of the TCP in the base frame. */
+function jacobian(cum) {
+  const p = col3(cum[5], 3);
+  const axes = [col3(cum[0], 2), neg3(col3(cum[1], 1)), neg3(col3(cum[2], 1)), neg3(col3(cum[3], 1)), col3(cum[4], 0)];
+  const J = [[], [], [], [], [], []];
+  for (let i = 0; i < 5; i++) {
+    const w = axes[i];
+    const v = cross3(w, sub3(p, col3(cum[i], 3)));
+    for (let r = 0; r < 3; r++) { J[r][i] = v[r]; J[r + 3][i] = w[r]; }
+  }
+  return J;
+}
+
+/** Analytic IK: TCP position in the base frame, tool pointing straight down, elbow up. */
+function ik(p) {
+  const q1 = Math.atan2(p[1], p[0]);
+  const r = Math.hypot(p[0], p[1]);
+  const dz = p[2] + L3 - H0;
+  const D = clamp((r * r + dz * dz - L1 * L1 - L2 * L2) / (2 * L1 * L2), -1, 1);
+  const b = Math.acos(D);
+  const q2 = Math.atan2(dz, r) + Math.atan2(L2 * Math.sin(b), L1 + L2 * Math.cos(b));
+  const q3 = -b;
+  const q4 = -Math.PI / 2 - q2 - q3;
+  return [q1, q2, q3, q4, 0];
+}
+const worldToBase = (p) => [p[0], p[1], p[2] - TABLE_TOP];
+const baseToWorld = (p) => [p[0], p[1], p[2] + TABLE_TOP];
+
+// ============================================================================
+// demo7.py のヘルパ・計測・計画 (移植)
+// ============================================================================
+const rot2 = (a) => { const c = Math.cos(a), s = Math.sin(a); return [[c, -s], [s, c]]; };
+const wrapHalfTurn = (a) => ((((a + Math.PI / 2) % Math.PI) + Math.PI) % Math.PI) - Math.PI / 2;
+const dot2 = (a, b) => a[0] * b[0] + a[1] * b[1];
+const norm2 = (a) => Math.hypot(a[0], a[1]);
+
+function palletCorners(pal) {
+  const R = rot2(pal.yaw);
+  const out = [];
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+    const lx = sx * HALF[0], ly = sy * HALF[1];
+    out.push([pal.x + R[0][0] * lx + R[0][1] * ly, pal.y + R[1][0] * lx + R[1][1] * ly]);
+  }
+  return out;
+}
+
+/** measure(): pallet pose against the locating frame. */
+function measure(pal) {
+  const ew = [pal.x - FRAME_CENTER_XY[0], pal.y - FRAME_CENTER_XY[1]];
+  const yaw = wrapHalfTurn(pal.yaw - FRAME_YAW);
+  const R = rot2(pal.yaw);
+  const el = [R[0][0] * ew[0] + R[1][0] * ew[1], R[0][1] * ew[0] + R[1][1] * ew[1]];
+  const inner = [HALF[0] + FRAME_CLEARANCE, HALF[1] + FRAME_CLEARANCE];
+  const Rf = rot2(FRAME_YAW);
+  const corners = palletCorners(pal);
+  let margin = Infinity;
+  for (const c of corners) {
+    const d = [c[0] - FRAME_CENTER_XY[0], c[1] - FRAME_CENTER_XY[1]];
+    const cf = [d[0] * Rf[0][0] + d[1] * Rf[1][0], d[0] * Rf[0][1] + d[1] * Rf[1][1]];
+    margin = Math.min(margin, inner[0] - Math.abs(cf[0]), inner[1] - Math.abs(cf[1]));
+  }
+  return { pos_w: ew, pos_local: el, yaw, margin, corners, in_frame: margin >= 0 };
+}
+
+const sgn = (v) => (v >= 0 ? "+" : "-");
+const f1 = (v, w = 6) => (sgn(v) + Math.abs(v).toFixed(1)).padStart(w);
+function summary(e) {
+  return `ずれ x=${f1(e.pos_w[0] * 1000)} mm, y=${f1(e.pos_w[1] * 1000)} mm, yaw=${(sgn(e.yaw) + Math.abs(e.yaw / DEG).toFixed(2)).padStart(6)} deg`
+    + `  -> ${e.in_frame ? "枠内" : "枠外"} (余裕 ${(sgn(e.margin) + Math.abs(e.margin * 1000).toFixed(1)).padStart(5)} mm)`;
+}
+
+function withinTolerance(e) {
+  const centred = Math.abs(e.yaw / DEG) <= YAW_TOL_DEG && Math.abs(e.pos_local[0]) <= POS_TOL && Math.abs(e.pos_local[1]) <= POS_TOL;
+  return centred || e.margin >= DONE_MARGIN;
+}
+
+const reachable = (xy) => { const r = norm2([xy[0] - SHOULDER_XY_W[0], xy[1] - SHOULDER_XY_W[1]]); return r >= REACH_MIN && r <= REACH_MAX; };
+
+function makePlan(kind, contact, d, follow, label) {
+  return { kind, contact_xy: contact, direction: d, follow_travel: follow, label,
+           start_xy: [contact[0] - d[0] * STANDOFF, contact[1] - d[1] * STANDOFF] };
+}
+
+/** plan_push(): pick the next push from the current error. */
+function planPush(pal, e, log) {
+  const R = rot2(pal.yaw);
+  const axes = [[R[0][0], R[1][0]], [R[0][1], R[1][1]]];
+  const center = [pal.x, pal.y];
+  if (Math.abs(e.yaw / DEG) > YAW_TOL_DEG) {
+    let best = null;
+    for (const na of [0, 1]) {
+      const ta = 1 - na;
+      for (const ns of [1, -1]) {
+        const n = [ns * axes[na][0], ns * axes[na][1]];
+        for (const ls of [1, -1]) {
+          const lever = [ls * ROT_LEVER_FRACTION * HALF[ta] * axes[ta][0], ls * ROT_LEVER_FRACTION * HALF[ta] * axes[ta][1]];
+          const r = [HALF[na] * n[0] + lever[0], HALF[na] * n[1] + lever[1]];
+          const d = [-n[0], -n[1]];
+          const torque = r[0] * d[1] - r[1] * d[0];
+          if (torque * e.yaw >= 0) continue;
+          const contact = [center[0] + r[0], center[1] + r[1]];
+          const follow = 1.6 * Math.abs(e.yaw) * norm2(lever) + 0.010;
+          const plan = makePlan("rotate", contact, d, follow,
+            `回転押し (yaw ${sgn(e.yaw)}${Math.abs(e.yaw / DEG).toFixed(1)} deg を戻す, 腕長 ${(Math.abs(torque) * 1000).toFixed(0)} mm)`);
+          const end = [contact[0] + d[0] * follow, contact[1] + d[1] * follow];
+          if (!(reachable(plan.start_xy) && reachable(end))) continue;
+          const score = dot2(d, [-e.pos_w[0], -e.pos_w[1]]) + 0.3 * Math.abs(torque);
+          if (best === null || score > best[0]) best = [score, plan];
+        }
+      }
+    }
+    if (best !== null) return best[1];
+    log("WARN", "届く回転押しの候補がありません。並進補正を先に行います。");
+  }
+  const order = [0, 1].sort((a, b) => Math.abs(e.pos_local[b]) - Math.abs(e.pos_local[a]));
+  for (const ax of order) {
+    const comp = e.pos_local[ax];
+    if (Math.abs(comp) <= POS_TOL) continue;
+    const s = -Math.sign(comp);
+    const d = [s * axes[ax][0], s * axes[ax][1]];
+    const contact = [center[0] - d[0] * HALF[ax], center[1] - d[1] * HALF[ax]];
+    const follow = 1.5 * Math.abs(comp) + 0.010;
+    const plan = makePlan("translate", contact, d, follow,
+      `並進押し (パレット${ax === 0 ? "長" : "短"}辺方向に ${(Math.abs(comp) * 1000).toFixed(1)} mm)`);
+    const end = [contact[0] + d[0] * follow, contact[1] + d[1] * follow];
+    if (reachable(plan.start_xy) && reachable(end)) return plan;
+    log("WARN", `${plan.label} はアームの可動範囲外のためスキップします。`);
+  }
+  return null;
+}
+
+/** push_should_stop(): predictive stop using the servo lag. */
+function pushShouldStop(plan, e, linVel, yawRate, startYaw) {
+  if (plan.kind === "rotate") {
+    const remaining = Math.abs(e.yaw);
+    if (e.yaw * startYaw <= 0) return true;
+    const closing = -yawRate * Math.sign(e.yaw);
+    return remaining <= Math.max(closing, 0) * SERVO_LAG_S + 0.3 * DEG;
+  }
+  const remaining = dot2([-e.pos_w[0], -e.pos_w[1]], plan.direction);
+  const closing = dot2(linVel, plan.direction);
+  return remaining <= Math.max(closing, 0) * SERVO_LAG_S + 0.0005;
+}
+
+// ============================================================================
+// パレットの準静的押しモデル (指先 = 半径 FINGER_TIP_HALF の円、摩擦なし接触)
+// 力 f を点 r に加えたときの運動を (v, ω) ∝ (f, (r×f)/c²) で近似し、めり込みを解消する分だけ動かす。
+// ============================================================================
+const LIMIT_SURFACE_C = 0.0255; // 摩擦モーメント / 摩擦力 [m] (80x60 mm 一様接地の平均半径)
+
+function resolveContact(pal, tip) {
+  let touched = false;
+  for (let it = 0; it < 4; it++) {
+    const R = rot2(pal.yaw);
+    const dx = tip[0] - pal.x, dy = tip[1] - pal.y;
+    const pl = [R[0][0] * dx + R[1][0] * dy, R[0][1] * dx + R[1][1] * dy];
+    let nl, cl, depth;
+    if (Math.abs(pl[0]) < HALF[0] && Math.abs(pl[1]) < HALF[1]) {
+      const gx = HALF[0] - Math.abs(pl[0]), gy = HALF[1] - Math.abs(pl[1]);
+      if (gx < gy) { nl = [Math.sign(pl[0]) || 1, 0]; cl = [nl[0] * HALF[0], pl[1]]; depth = gx + FINGER_TIP_HALF; }
+      else { nl = [0, Math.sign(pl[1]) || 1]; cl = [pl[0], nl[1] * HALF[1]]; depth = gy + FINGER_TIP_HALF; }
+    } else {
+      const q = [clamp(pl[0], -HALF[0], HALF[0]), clamp(pl[1], -HALF[1], HALF[1])];
+      const dl = [pl[0] - q[0], pl[1] - q[1]];
+      const dist = norm2(dl);
+      if (dist >= FINGER_TIP_HALF - 1e-7) break;
+      nl = [dl[0] / dist, dl[1] / dist]; cl = q; depth = FINGER_TIP_HALF - dist;
+    }
+    touched = true;
+    const n = [R[0][0] * nl[0] + R[0][1] * nl[1], R[1][0] * nl[0] + R[1][1] * nl[1]];
+    const r = [R[0][0] * cl[0] + R[0][1] * cl[1], R[1][0] * cl[0] + R[1][1] * cl[1]];
+    const f = [-n[0], -n[1]];
+    const tau = r[0] * f[1] - r[1] * f[0];
+    const w = tau / (LIMIT_SURFACE_C * LIMIT_SURFACE_C);
+    const s = 1 + tau * w;
+    const k = depth / s;
+    pal.x += k * f[0]; pal.y += k * f[1]; pal.yaw += k * w;
+  }
+  return touched;
+}
+
+// ============================================================================
+// ミッション (demo7.py の step_mission を 1 回の押しで打ち切り)
+// ============================================================================
+function simulate(offset) {
+  const frames = [];
+  const logs = [];
+  let t = 0;
+  const log = (tag, msg) => logs.push({ t, tag, msg });
+
+  const pal = { x: FRAME_CENTER_XY[0] + offset.x, y: FRAME_CENTER_XY[1] + offset.y, yaw: FRAME_YAW + offset.yaw };
+  let cmd = HOME_TCP_W.slice();
+  let qA = ik(worldToBase(cmd));
+  let phase = "INSPECT", pt = 0;
+  let plan = null, pushTravel = 0, contactTravel = null, startYaw = 0, startXY = [0, 0], backGoal = null;
+  let pushCount = 0, lamp = 0, doneT = 0, inspections = 0;
+  let linVel = [0, 0], yawRate = 0;
+  const enter = (p) => { phase = p; pt = 0; };
+  const moveCmd = (goal, speed) => {
+    const d = sub3(goal, cmd), dist = norm3(d), step = speed * DT;
+    if (dist <= step) { cmd = goal.slice(); return true; }
+    cmd = add3(cmd, scale3(d, step / dist));
+    return false;
+  };
+
+  const initErr = measure(pal);
+  log("PLC ", `嵌合ステーション: パレット位置を検査 ... ${summary(initErr)}`);
+  if (!initErr.in_frame) log("PLC ", "*** パレット位置ずれ検出: ライン停止 *** -> アームによる自動復旧を開始します");
+
+  for (let stepIdx = 0; stepIdx < 120 * 40; stepIdx++) {
+    pt += DT;
+    // ---- step_mission -------------------------------------------------------------
+    if (phase === "INSPECT") {
+      if (pt >= INSPECT_S) {
+        const e = measure(pal);
+        log("MEAS", `計測 #${pushCount}: ${summary(e)}`);
+        inspections++;
+        if (withinTolerance(e)) {
+          lamp = e.in_frame ? 2 : 0;
+          log("PLC ", e.in_frame ? `位置決め完了 (${pushCount} 回押し) -> ライン再開` : "許容範囲内ですが枠外です。作業者を呼び出します。");
+          enter("RETURN_HOME");
+        } else if (inspections >= 2) {
+          log("DEMO", "1 回分の押し動作のみ表示しています (demo7.py ではここで次の押しを計画します)");
+          enter("RETURN_HOME");
+        } else {
+          const p = planPush(pal, e, log);
+          if (p === null) {
+            log("PLC ", "アームの届く押し方が見つかりません。作業者を呼び出します。");
+            enter("RETURN_HOME");
+          } else {
+            plan = p; pushCount++; lamp = 1;
+            log("PLAN", `押し #${pushCount}: ${p.label}`);
+            log("    ", `接触点 (${(p.contact_xy[0] * 1000).toFixed(0)}, ${(p.contact_xy[1] * 1000).toFixed(0)}) mm, 押し方向 (${sgn(p.direction[0])}${Math.abs(p.direction[0]).toFixed(2)}, ${sgn(p.direction[1])}${Math.abs(p.direction[1]).toFixed(2)})`);
+            enter("MOVE_ABOVE");
+          }
+        }
+      }
+    } else if (phase === "MOVE_ABOVE") {
+      const goal = [plan.start_xy[0], plan.start_xy[1], TABLE_TOP + TRAVEL_HEIGHT];
+      if (cmd[2] < TABLE_TOP + TRAVEL_HEIGHT - 1e-4) moveCmd([cmd[0], cmd[1], TABLE_TOP + TRAVEL_HEIGHT], DESCEND_SPEED);
+      else if (moveCmd(goal, TRAVEL_SPEED)) enter("DESCEND");
+    } else if (phase === "DESCEND") {
+      const goal = [plan.start_xy[0], plan.start_xy[1], TABLE_TOP + PUSH_HEIGHT];
+      if (moveCmd(goal, DESCEND_SPEED) && pt > 0.3) {
+        pushTravel = 0; contactTravel = null;
+        startYaw = measure(pal).yaw; startXY = [pal.x, pal.y];
+        enter("PUSH");
+      }
+    } else if (phase === "PUSH") {
+      const e = measure(pal);
+      let leave = false;
+      if (contactTravel === null) {
+        const moved = norm2([pal.x - startXY[0], pal.y - startXY[1]]);
+        const turned = Math.abs((e.yaw - startYaw) / DEG);
+        if (moved > CONTACT_MOVE || turned > CONTACT_TURN_DEG) {
+          contactTravel = pushTravel;
+          log("PUSH", `接触 (指先前進 ${(pushTravel * 1000).toFixed(1)} mm でパレットが動き始めた)`);
+        } else if (pushTravel >= CONTACT_SEARCH) {
+          log("PUSH", `接触できませんでした (指先前進 ${(pushTravel * 1000).toFixed(1)} mm)。計測し直します。`);
+          enter("BACKOFF"); leave = true;
+        }
+      }
+      if (!leave && contactTravel !== null) {
+        const followed = pushTravel - contactTravel;
+        const reached = pushShouldStop(plan, e, linVel, yawRate, startYaw);
+        if (reached || followed >= plan.follow_travel) {
+          log("PUSH", `停止 (${reached ? "目標到達" : "最大押し量"}, 接触後の押し量 ${(followed * 1000).toFixed(1)} mm): ${summary(e)}`);
+          enter("BACKOFF"); leave = true;
+        }
+      }
+      if (!leave) {
+        const slowFrom = STANDOFF - FINGER_TIP_HALF - SLOWDOWN_BEFORE_FACE;
+        const inAir = contactTravel === null && pushTravel < slowFrom;
+        const step = (inAir ? APPROACH_SPEED : PUSH_SPEED) * DT;
+        cmd = [cmd[0] + plan.direction[0] * step, cmd[1] + plan.direction[1] * step, cmd[2]];
+        pushTravel += step;
+        if (Math.floor(pt / 0.5) !== Math.floor((pt - DT) / 0.5)) {
+          const tcpNow = baseToWorld(col3(fk(qA).cum[5], 3));
+          const lag = norm3(sub3(tcpNow, cmd)) * 1000;
+          log("    ", `t=${pt.toFixed(1).padStart(4)}s 押し中: 指先 (${(tcpNow[0] * 1000).toFixed(0)}, ${(tcpNow[1] * 1000).toFixed(0)}, ${((tcpNow[2] - TABLE_TOP) * 1000).toFixed(0)}) mm 追従誤差 ${lag.toFixed(1).padStart(4)} mm | ${summary(e)}`);
+        }
+      }
+    } else if (phase === "BACKOFF") {
+      if (pt < DT * 1.5) backGoal = [cmd[0] - plan.direction[0] * BACKOFF, cmd[1] - plan.direction[1] * BACKOFF, cmd[2]];
+      if (moveCmd(backGoal, PUSH_SPEED * 2)) enter("RISE");
+    } else if (phase === "RISE") {
+      if (moveCmd([cmd[0], cmd[1], TABLE_TOP + TRAVEL_HEIGHT], DESCEND_SPEED)) { plan = null; enter("INSPECT"); }
+    } else if (phase === "RETURN_HOME") {
+      if (cmd[2] < TABLE_TOP + TRAVEL_HEIGHT - 1e-4) moveCmd([cmd[0], cmd[1], TABLE_TOP + TRAVEL_HEIGHT], DESCEND_SPEED);
+      else if (moveCmd(HOME_TCP_W, TRAVEL_SPEED)) enter("DONE");
+    }
+
+    // ---- IK + サーボ一次遅れ -------------------------------------------------------
+    const qT = ik(worldToBase(cmd));
+    qA = qA.map((v, i) => v + (qT[i] - v) * (DT / SERVO_LAG_S));
+    const tcp = baseToWorld(col3(fk(qA).cum[5], 3));
+
+    // ---- パレット (指先が天板高さ以下なら接触判定) ---------------------------------------
+    const prev = { ...pal };
+    let touching = false;
+    if (tcp[2] - TABLE_TOP - 0.012 < PALLET_SIZE[2]) touching = resolveContact(pal, tcp);
+    linVel = [(pal.x - prev.x) / DT, (pal.y - prev.y) / DT];
+    yawRate = (pal.yaw - prev.yaw) / DT;
+
+    t += DT;
+    frames.push({ t, phase, qT, qA: qA.slice(), cmd: cmd.slice(), tcp, pal: { ...pal }, lamp, plan, pushTravel, touching });
+    if (phase === "DONE") { doneT += DT; if (doneT >= FINAL_HOLD_S) break; }
+  }
+  return { frames, logs };
+}
+
+// ============================================================================
+// three.js シーン
+// ============================================================================
+const viewport = document.getElementById("viewport");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.domElement.className = "three";
+viewport.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 20);
+camera.up.set(0, 0, 1);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x666a70, 0.75));
+const sun = new THREE.DirectionalLight(0xffffff, 0.7);
+sun.position.set(0.6, -0.8, 1.6);
+scene.add(sun);
+
+const mat = (color, opts = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.7, metalness: 0.05, ...opts });
+function box(sx, sy, sz, material, x = 0, y = 0, z = 0) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), material);
+  m.position.set(x, y, z);
+  return m;
+}
+
+// ground + table
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(3, 3), mat(0x8a9099));
+scene.add(ground);
+const grid = new THREE.GridHelper(3, 30, 0x6b7280, 0x7c838c);
+grid.rotation.x = Math.PI / 2; grid.position.z = 0.001;
+scene.add(grid);
+scene.add(box(TABLE_SIZE[0], TABLE_SIZE[1], TABLE_SIZE[2], mat(0x8c9196), TABLE_CENTER_XY[0], TABLE_CENTER_XY[1], TABLE_TOP / 2));
+
+// locating frame tape (_frame_tape_cfgs)
+(function addFrameTape() {
+  const ix = PALLET_SIZE[0] + 2 * FRAME_CLEARANCE, iy = PALLET_SIZE[1] + 2 * FRAME_CLEARANCE, w = FRAME_LINE_WIDTH;
+  const R = rot2(FRAME_YAW);
+  const pieces = [
+    [[0.5 * ix + 0.5 * w, 0], [w, iy + 2 * w]],
+    [[-0.5 * ix - 0.5 * w, 0], [w, iy + 2 * w]],
+    [[0, 0.5 * iy + 0.5 * w], [ix, w]],
+    [[0, -0.5 * iy - 0.5 * w], [ix, w]],
+  ];
+  const tapeMat = mat(0xf2cc0d, { roughness: 0.9 });
+  for (const [c, s] of pieces) {
+    const cx = FRAME_CENTER_XY[0] + R[0][0] * c[0] + R[0][1] * c[1];
+    const cy = FRAME_CENTER_XY[1] + R[1][0] * c[0] + R[1][1] * c[1];
+    const m = box(s[0], s[1], 0.0008, tapeMat, cx, cy, TABLE_TOP + 0.0004);
+    m.rotation.z = FRAME_YAW;
+    scene.add(m);
+  }
+})();
+
+// pallet
+const palletMesh = box(PALLET_SIZE[0], PALLET_SIZE[1], PALLET_SIZE[2], mat(0x2659bf, { roughness: 0.6 }));
+palletMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(palletMesh.geometry), new THREE.LineBasicMaterial({ color: 0x0b1f4a })));
+const palletAxes = new THREE.AxesHelper(0.03);
+palletAxes.position.z = PALLET_SIZE[2] / 2 + 0.001;
+palletMesh.add(palletAxes);
+scene.add(palletMesh);
+
+// signal lamp
+const post = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, LAMP_POS[2] - TABLE_TOP, 16), mat(0x262626));
+post.rotation.x = Math.PI / 2;
+post.position.set(LAMP_POS[0], LAMP_POS[1], (TABLE_TOP + LAMP_POS[2]) / 2);
+scene.add(post);
+const LAMP_COLORS = [0xff1a1a, 0xffbf00, 0x14ff40];
+const LAMP_TEXT = ["ライン停止 (ずれ検出)", "自動復旧中", "位置決め OK"];
+const lampMat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: LAMP_COLORS[0], emissiveIntensity: 1 });
+const lampMesh = new THREE.Mesh(new THREE.SphereGeometry(0.022, 24, 16), lampMat);
+lampMesh.position.set(...LAMP_POS);
+scene.add(lampMesh);
+
+// push arrow (flat cone on the table)
+const arrowMesh = new THREE.Mesh(new THREE.ConeGeometry(0.008, 0.025, 20), mat(0xf2401a, { roughness: 0.5 }));
+scene.add(arrowMesh);
+
+// command ghost (where the IK is told to put the tool point)
+const ghost = new THREE.Mesh(new THREE.SphereGeometry(0.006, 12, 8), new THREE.MeshBasicMaterial({ color: 0xd6336c, wireframe: true }));
+scene.add(ghost);
+
+// robot: chain of groups, each group's matrix = T_{i-1}^i
+const baseGroup = new THREE.Group();
+baseGroup.position.set(0, 0, TABLE_TOP);
+scene.add(baseGroup);
+const linkMat = mat(0xf0b429, { roughness: 0.5 });
+const darkMat = mat(0x2b2f36, { roughness: 0.6 });
+{
+  const col = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.04, H0 - 0.02, 28), darkMat);
+  col.rotation.x = Math.PI / 2;
+  col.position.z = (H0 - 0.02) / 2;
+  baseGroup.add(col);
+}
+const jointGroups = [];
+let parent = baseGroup;
+for (let i = 0; i < 6; i++) {
+  const g = new THREE.Group();
+  g.matrixAutoUpdate = false;
+  parent.add(g);
+  jointGroups.push(g);
+  parent = g;
+}
+const pitchJoint = (r, w) => new THREE.Mesh(new THREE.CylinderGeometry(r, r, w, 24), darkMat);
+jointGroups[0].add(box(0.055, 0.055, 0.04, linkMat, 0, 0, -0.005));
+jointGroups[1].add(pitchJoint(0.02, 0.05));
+jointGroups[1].add(box(L1, 0.026, 0.032, linkMat, L1 / 2, 0, 0));
+jointGroups[2].add(pitchJoint(0.017, 0.045));
+jointGroups[2].add(box(L2, 0.022, 0.028, linkMat, L2 / 2, 0, 0));
+jointGroups[3].add(pitchJoint(0.015, 0.04));
+jointGroups[3].add(box(0.05, 0.028, 0.03, linkMat, 0.025, 0, 0));
+jointGroups[4].add(box(0.025, 0.034, 0.024, darkMat, 0.0625, 0, 0));
+const jawLen = L3 + 0.012 - 0.072;
+jointGroups[4].add(box(jawLen, 0.0095, 0.016, linkMat, 0.072 + jawLen / 2, 0.005, 0));
+jointGroups[4].add(box(jawLen, 0.0095, 0.016, linkMat, 0.072 + jawLen / 2, -0.005, 0));
+jointGroups[5].add(new THREE.Mesh(new THREE.SphereGeometry(0.004, 12, 8), new THREE.MeshBasicMaterial({ color: 0xd6336c })));
+const jointAxes = jointGroups.map((g) => { const a = new THREE.AxesHelper(0.04); a.material.depthTest = false; a.renderOrder = 10; g.add(a); return a; });
+
+// ---- camera orbit (drag = rotate, wheel = zoom) -------------------------------------------
+const FOCUS = [FRAME_CENTER_XY[0], FRAME_CENTER_XY[1], TABLE_TOP];
+const orbit = { target: new THREE.Vector3(), r: 0.6, theta: 0, phi: 0.5 };
+function setObliqueView() {
+  const eye = [FOCUS[0] + 0.42, FOCUS[1] - 0.42, FOCUS[2] + 0.30];
+  const tgt = [FOCUS[0] - 0.06, FOCUS[1], FOCUS[2] + 0.04];
+  const v = sub3(eye, tgt);
+  orbit.target.set(...tgt);
+  orbit.r = norm3(v);
+  orbit.theta = Math.atan2(v[1], v[0]);
+  orbit.phi = Math.asin(v[2] / orbit.r);
+}
+function setTopView() {
+  orbit.target.set(FOCUS[0] - 0.05, FOCUS[1], FOCUS[2]);
+  orbit.r = 0.62; orbit.theta = -Math.PI; orbit.phi = 1.52;
+}
+function updateCamera() {
+  const { r, theta, phi, target } = orbit;
+  camera.position.set(target.x + r * Math.cos(phi) * Math.cos(theta), target.y + r * Math.cos(phi) * Math.sin(theta), target.z + r * Math.sin(phi));
+  camera.lookAt(target);
+}
+setObliqueView();
+let drag = null;
+renderer.domElement.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY }; renderer.domElement.setPointerCapture(e.pointerId); });
+renderer.domElement.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  orbit.theta -= (e.clientX - drag.x) * 0.008;
+  orbit.phi = clamp(orbit.phi + (e.clientY - drag.y) * 0.008, 0.05, 1.55);
+  drag = { x: e.clientX, y: e.clientY };
+});
+renderer.domElement.addEventListener("pointerup", () => { drag = null; });
+renderer.domElement.addEventListener("wheel", (e) => { e.preventDefault(); orbit.r = clamp(orbit.r * Math.exp(e.deltaY * 0.001), 0.15, 2.5); }, { passive: false });
+
+// ---- theme ----------------------------------------------------------------------------------
+let tokens = {};
+function readTokens() {
+  const cs = getComputedStyle(document.documentElement);
+  for (const k of ["scene-bg", "panel", "ink", "muted", "grid", "plan", "err", "pallet", "tape", "tcp", "line"]) tokens[k] = cs.getPropertyValue("--" + k).trim();
+  renderer.setClearColor(new THREE.Color(tokens["scene-bg"]));
+}
+readTokens();
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { readTokens(); needPanel = true; });
+
+// ---- resize ---------------------------------------------------------------------------------
+const topCanvas = document.getElementById("topview");
+function resize() {
+  const w = viewport.clientWidth, h = viewport.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  const dpr = Math.min(window.devicePixelRatio, 2);
+  topCanvas.width = topCanvas.clientWidth * dpr;
+  topCanvas.height = topCanvas.clientHeight * dpr;
+  needPanel = true;
+}
+new ResizeObserver(resize).observe(viewport);
+
+// ============================================================================
+// 表示 (行列・ベクトル・トップビュー)
+// ============================================================================
+const PHASE_JA = {
+  INSPECT: "計測 (INSPECT)", MOVE_ABOVE: "押し始め位置の上空へ (MOVE_ABOVE)", DESCEND: "降下 (DESCEND)",
+  PUSH: "押し (PUSH)", BACKOFF: "後退 (BACKOFF)", RISE: "上昇 (RISE)", RETURN_HOME: "ホームへ戻る (RETURN_HOME)", DONE: "完了 (DONE)",
+};
+
+function num(v, d) {
+  const x = Math.abs(v) < 0.5 * 10 ** -d ? 0 : v;
+  return (x < 0 ? "−" : " ") + Math.abs(x).toFixed(d);
+}
+/** rows: 2-D array. opts: dec, cls(i,j), rowLabels, colLabels */
+function matHTML(rows, opts = {}) {
+  const d = opts.dec ?? 4;
+  let h = "<table class='m'>";
+  if (opts.colLabels) h += "<tr>" + (opts.rowLabels ? "<th></th>" : "") + opts.colLabels.map((c) => `<th>${c}</th>`).join("") + "</tr>";
+  rows.forEach((row, i) => {
+    h += "<tr>";
+    if (opts.rowLabels) h += `<th class='rl'>${opts.rowLabels[i]}</th>`;
+    row.forEach((v, j) => { const c = opts.cls ? opts.cls(i, j) : ""; h += `<td${c ? ` class='${c}'` : ""}>${num(v, d)}</td>`; });
+    h += "</tr>";
+  });
+  return h + "</table>";
+}
+const homCls = (i, j) => (i < 3 && j < 3 ? "r" : i < 3 && j === 3 ? "t" : "");
+const bracket = (inner) => `<span class="mat">${inner}</span>`;
+const mrow = (label, inner) => `<div class="mrow"><span class="mlabel">${label}</span>${inner}</div>`;
+const vecRow = (label, v, dec = 1) => mrow(label, bracket(matHTML([v], { dec })));
+
+let selJoint = 5;
+let showJointAxes = true;
+const jointSeg = document.getElementById("jointSeg");
+FRAME_NAMES.forEach((n, i) => {
+  const b = document.createElement("button");
+  b.textContent = n.split(" ")[0];
+  b.title = n;
+  b.addEventListener("click", () => { selJoint = i; needPanel = true; });
+  jointSeg.appendChild(b);
+});
+
+const jointTable = document.getElementById("jointTable");
+function updatePanels(f) {
+  const { loc, cum } = fk(f.qA);
+  // joints
+  let jt = "<tr><th>関節</th><th>目標</th><th>実際</th><th>差</th></tr>";
+  JOINT_NAMES.forEach((n, i) => {
+    jt += `<tr><td>q${i + 1} ${n}</td><td>${num(f.qT[i] / DEG, 2)}</td><td>${num(f.qA[i] / DEG, 2)} <span style="color:var(--muted)">(${num(f.qA[i], 3)})</span></td><td>${num((f.qT[i] - f.qA[i]) / DEG, 2)}</td></tr>`;
+  });
+  jt += `<tr><td>gripper</td><td>${num(0, 2)}</td><td>${num(0, 2)}</td><td>${num(0, 2)}</td></tr>`;
+  jointTable.innerHTML = jt;
+
+  document.getElementById("matTcp").innerHTML = mrow("T₀ᵀᶜᴾ =", bracket(matHTML(M4.rows(cum[5]), { cls: homCls })));
+
+  [...jointSeg.children].forEach((b, i) => b.classList.toggle("on", i === selJoint));
+  document.getElementById("matJoint").innerHTML =
+    mrow(FRAME_NAMES[selJoint].split(" ")[0] + " =", bracket(matHTML(M4.rows(loc[selJoint]), { cls: homCls })))
+    + mrow(`T₀${["¹", "²", "³", "⁴", "⁵", "ᵀᶜᴾ"][selJoint]} =`, bracket(matHTML(M4.rows(cum[selJoint]), { cls: homCls })));
+  document.getElementById("jointNote").textContent = FRAME_NOTES[selJoint] + "。3D ビューの軸: x 赤 / y 緑 / z 青。";
+
+  document.getElementById("matJac").innerHTML = bracket(matHTML(jacobian(cum), {
+    dec: 3, rowLabels: ["vx", "vy", "vz", "ωx", "ωy", "ωz"], colLabels: ["q1", "q2", "q3", "q4", "q5"],
+  }));
+
+  // pallet
+  const p = f.pal, c = Math.cos(p.yaw), s = Math.sin(p.yaw), pz = TABLE_TOP + PALLET_SIZE[2] / 2;
+  const Tp = [[c, -s, 0, p.x], [s, c, 0, p.y], [0, 0, 1, pz], [0, 0, 0, 1]];
+  document.getElementById("matPallet").innerHTML = mrow("T_W^P =", bracket(matHTML(Tp, { cls: homCls })))
+    + `<p class="note">yaw = ${(p.yaw / DEG).toFixed(2)} deg (枠は ${(FRAME_YAW / DEG).toFixed(0)} deg)。R の 1 列目 = パレット長辺 (局所 x) のワールド方向。</p>`;
+  const e = measure(p);
+  document.getElementById("matCorners").innerHTML = bracket(matHTML(e.corners.map((v) => v.map((x) => x * 1000)), {
+    dec: 1, rowLabels: ["(−x, −y)", "(−x, +y)", "(+x, −y)", "(+x, +y)"], colLabels: ["x", "y"],
+  })) + `<p class="note">局所座標 (±${HALF[0] * 1000}, ±${HALF[1] * 1000}) mm を R で回して中心に足したもの。</p>`;
+
+  // vectors
+  let v = "";
+  v += vecRow("p_P パレット", [p.x * 1000, p.y * 1000, pz * 1000]);
+  v += vecRow("p_F 枠中心", [FRAME_CENTER_XY[0] * 1000, FRAME_CENTER_XY[1] * 1000, TABLE_TOP * 1000]);
+  v += vecRow("e_w = p_P−p_F", [e.pos_w[0] * 1000, e.pos_w[1] * 1000]);
+  v += vecRow("e_local = Rᵀe_w", [e.pos_local[0] * 1000, e.pos_local[1] * 1000]);
+  v += `<div class="kv mono" style="margin:4px 0 8px"><span>e_yaw</span><span>${num(e.yaw / DEG, 2)} deg (許容 ±${YAW_TOL_DEG})</span><span>余裕 margin</span><span>${num(e.margin * 1000, 2)} mm → ${e.in_frame ? "枠内" : "枠外"}</span></div>`;
+  if (f.plan) {
+    const pl = f.plan;
+    v += `<div style="font-size:12.5px;margin:2px 0">${pl.kind === "rotate" ? "回転押し" : "並進押し"}: ${pl.label}</div>`;
+    v += vecRow("c 接触点", [pl.contact_xy[0] * 1000, pl.contact_xy[1] * 1000]);
+    v += vecRow("s 降下点", [pl.start_xy[0] * 1000, pl.start_xy[1] * 1000]);
+    v += vecRow("d 押し方向", [pl.direction[0], pl.direction[1]], 3);
+    v += `<div class="kv mono" style="margin:4px 0 8px"><span>押し進み量</span><span>${(f.pushTravel * 1000).toFixed(1)} mm (接触後上限 ${(pl.follow_travel * 1000).toFixed(1)} mm)</span></div>`;
+  } else {
+    v += `<p class="note">押し計画: なし (計測中 / 押し終わり)</p>`;
+  }
+  v += vecRow("TCP 指令", [f.cmd[0] * 1000, f.cmd[1] * 1000, (f.cmd[2] - TABLE_TOP) * 1000]);
+  v += vecRow("TCP 実際", [f.tcp[0] * 1000, f.tcp[1] * 1000, (f.tcp[2] - TABLE_TOP) * 1000]);
+  v += `<p class="note">TCP の z は天板からの高さ。指令と実際の差がサーボ遅れ (追従誤差 ${(norm3(sub3(f.tcp, f.cmd)) * 1000).toFixed(1)} mm)。</p>`;
+  document.getElementById("vecs").innerHTML = v;
+}
+
+function drawTopView(i) {
+  const f = frames[i];
+  const ctx = topCanvas.getContext("2d");
+  const W = topCanvas.width, H = topCanvas.height;
+  const span = 0.075;
+  const k = W / (2 * span);
+  const X = (x, y) => [W / 2 - (y - FRAME_CENTER_XY[1]) * k, H / 2 - (x - FRAME_CENTER_XY[0]) * k];
+  const dpr = W / topCanvas.clientWidth;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = tokens.panel; ctx.fillRect(0, 0, W, H);
+  // 10 mm grid
+  ctx.strokeStyle = tokens.grid; ctx.lineWidth = 1;
+  for (let g = -0.07; g <= 0.0701; g += 0.01) {
+    let [a, b] = X(FRAME_CENTER_XY[0] + g, FRAME_CENTER_XY[1] - span);
+    let [c2, d2] = X(FRAME_CENTER_XY[0] + g, FRAME_CENTER_XY[1] + span);
+    ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c2, d2); ctx.stroke();
+    [a, b] = X(FRAME_CENTER_XY[0] - span, FRAME_CENTER_XY[1] + g);
+    [c2, d2] = X(FRAME_CENTER_XY[0] + span, FRAME_CENTER_XY[1] + g);
+    ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c2, d2); ctx.stroke();
+  }
+  const poly = (pts, fill, stroke, lw) => {
+    ctx.beginPath();
+    pts.forEach((p, n) => { const [a, b] = X(p[0], p[1]); n ? ctx.lineTo(a, b) : ctx.moveTo(a, b); });
+    ctx.closePath();
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); }
+  };
+  // frame tape (centre line of the tape)
+  const fx = HALF[0] + FRAME_CLEARANCE + FRAME_LINE_WIDTH / 2, fy = HALF[1] + FRAME_CLEARANCE + FRAME_LINE_WIDTH / 2;
+  const Rf = rot2(FRAME_YAW);
+  const fpts = [[-fx, -fy], [fx, -fy], [fx, fy], [-fx, fy]].map(([a, b]) => [FRAME_CENTER_XY[0] + Rf[0][0] * a + Rf[0][1] * b, FRAME_CENTER_XY[1] + Rf[1][0] * a + Rf[1][1] * b]);
+  poly(fpts, null, tokens.tape, FRAME_LINE_WIDTH * k);
+  // pallet
+  const c = palletCorners(f.pal);
+  poly([c[0], c[2], c[3], c[1]], tokens.pallet + "55", tokens.pallet, 1.5 * dpr);
+  // pallet local axes
+  const R = rot2(f.pal.yaw);
+  const axis = (dx, dy, color) => {
+    const [a, b] = X(f.pal.x, f.pal.y), [e2, g2] = X(f.pal.x + dx * 0.025, f.pal.y + dy * 0.025);
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5 * dpr; ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(e2, g2); ctx.stroke();
+  };
+  axis(R[0][0], R[1][0], "#e03131");
+  axis(R[0][1], R[1][1], "#2f9e44");
+  const arrow = (p0, p1, color, lw) => {
+    const [a, b] = X(p0[0], p0[1]), [e2, g2] = X(p1[0], p1[1]);
+    const ang = Math.atan2(g2 - b, e2 - a), hl = 7 * dpr;
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = lw * dpr;
+    ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(e2, g2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(e2, g2);
+    ctx.lineTo(e2 - hl * Math.cos(ang - 0.4), g2 - hl * Math.sin(ang - 0.4));
+    ctx.lineTo(e2 - hl * Math.cos(ang + 0.4), g2 - hl * Math.sin(ang + 0.4));
+    ctx.closePath(); ctx.fill();
+  };
+  // error vector e_w
+  if (norm2([f.pal.x - FRAME_CENTER_XY[0], f.pal.y - FRAME_CENTER_XY[1]]) > 0.001) arrow(FRAME_CENTER_XY, [f.pal.x, f.pal.y], tokens.err, 2);
+  // frame centre cross
+  { const [a, b] = X(...FRAME_CENTER_XY); ctx.strokeStyle = tokens.ink; ctx.lineWidth = 1 * dpr; ctx.beginPath(); ctx.moveTo(a - 5 * dpr, b); ctx.lineTo(a + 5 * dpr, b); ctx.moveTo(a, b - 5 * dpr); ctx.lineTo(a, b + 5 * dpr); ctx.stroke(); }
+  // plan
+  if (f.plan) {
+    const pl = f.plan;
+    arrow(pl.start_xy, [pl.contact_xy[0] + pl.direction[0] * 0.012, pl.contact_xy[1] + pl.direction[1] * 0.012], tokens.plan, 2);
+    const [a, b] = X(...pl.contact_xy);
+    ctx.fillStyle = tokens.plan; ctx.beginPath(); ctx.arc(a, b, 3 * dpr, 0, 7); ctx.fill();
+  }
+  // tcp path + fingertip circle
+  ctx.strokeStyle = tokens.tcp + "88"; ctx.lineWidth = 1 * dpr; ctx.beginPath();
+  for (let n = 0; n <= i; n += 2) { const [a, b] = X(frames[n].tcp[0], frames[n].tcp[1]); n ? ctx.lineTo(a, b) : ctx.moveTo(a, b); }
+  ctx.stroke();
+  {
+    const [a, b] = X(f.tcp[0], f.tcp[1]);
+    const low = f.tcp[2] - TABLE_TOP - 0.012 < PALLET_SIZE[2];
+    ctx.strokeStyle = tokens.tcp; ctx.lineWidth = 1.5 * dpr;
+    ctx.setLineDash(low ? [] : [3 * dpr, 3 * dpr]);
+    ctx.beginPath(); ctx.arc(a, b, FINGER_TIP_HALF * k, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+    if (f.touching) { ctx.fillStyle = tokens.tcp + "55"; ctx.fill(); }
+  }
+  // labels
+  ctx.fillStyle = tokens.muted; ctx.font = `${10 * dpr}px system-ui, sans-serif`;
+  ctx.fillText("真上から (1 マス 10 mm)", 6 * dpr, 13 * dpr);
+  ctx.fillText("↑ +x  ← +y", 6 * dpr, H - 6 * dpr);
+  ctx.fillStyle = tokens.err; ctx.fillText("e_w", W - 70 * dpr, H - 20 * dpr);
+  ctx.fillStyle = tokens.plan; ctx.fillText("押し d", W - 40 * dpr, H - 20 * dpr);
+  ctx.fillStyle = tokens.tcp; ctx.fillText("指先", W - 70 * dpr, H - 6 * dpr);
+}
+
+function applyFrame(i) {
+  const f = frames[i];
+  const { loc } = fk(f.qA);
+  loc.forEach((T, n) => { jointGroups[n].matrix.set(...T); jointGroups[n].matrixWorldNeedsUpdate = true; });
+  palletMesh.position.set(f.pal.x, f.pal.y, TABLE_TOP + PALLET_SIZE[2] / 2);
+  palletMesh.rotation.set(0, 0, f.pal.yaw);
+  lampMat.emissive.setHex(LAMP_COLORS[f.lamp]);
+  ghost.position.set(...f.cmd);
+  const showArrow = f.plan && ["MOVE_ABOVE", "DESCEND", "PUSH"].includes(f.phase);
+  arrowMesh.visible = !!showArrow;
+  if (showArrow) {
+    const d = f.plan.direction;
+    arrowMesh.position.set(f.plan.contact_xy[0] - d[0] * 0.018, f.plan.contact_xy[1] - d[1] * 0.018, TABLE_TOP + 0.009);
+    arrowMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(d[0], d[1], 0));
+  }
+  document.getElementById("phaseChip").textContent = PHASE_JA[f.phase];
+  document.getElementById("lampDot").style.background = "#" + LAMP_COLORS[f.lamp].toString(16).padStart(6, "0");
+  document.getElementById("lampText").textContent = LAMP_TEXT[f.lamp];
+  timeline.value = i;
+  document.getElementById("tlabel").textContent = `t = ${f.t.toFixed(2)} s / ${frames[frames.length - 1].t.toFixed(2)} s`;
+  drawTopView(i);
+}
+
+// ============================================================================
+// 再生制御
+// ============================================================================
+const timeline = document.getElementById("timeline");
+const playBtn = document.getElementById("playBtn");
+const logEl = document.getElementById("log");
+let frames = [], logs = [], logDivs = [];
+let cursor = 0, playing = true, speed = 1, needPanel = true, lastPanel = 0, lastIdx = -1, lastVisibleLog = -1;
+
+function runSim() {
+  const offset = {
+    x: (parseFloat(document.getElementById("pX").value) || 0) / 1000,
+    y: (parseFloat(document.getElementById("pY").value) || 0) / 1000,
+    yaw: (parseFloat(document.getElementById("pYaw").value) || 0) * DEG,
+  };
+  ({ frames, logs } = simulate(offset));
+  timeline.max = frames.length - 1;
+  logEl.innerHTML = "";
+  logDivs = logs.map((l) => {
+    const d = document.createElement("div");
+    d.innerHTML = `<span class="tag">[${l.tag}]</span> <span style="color:var(--muted)">${l.t.toFixed(2).padStart(5)}s</span> ${l.msg.replace(/</g, "&lt;")}`;
+    logEl.appendChild(d);
+    return d;
+  });
+  cursor = 0; lastIdx = -1; lastVisibleLog = -2; needPanel = true;
+  playing = true; playBtn.textContent = "⏸ 停止";
+}
+
+function updateLog(t) {
+  let last = -1;
+  logDivs.forEach((d, n) => { const vis = logs[n].t <= t + 1e-9; d.classList.toggle("future", !vis); if (vis) last = n; });
+  if (last !== lastVisibleLog && last >= 0) {
+    lastVisibleLog = last;
+    const d = logDivs[last];
+    logEl.scrollTop = d.offsetTop - logEl.offsetTop - logEl.clientHeight + d.offsetHeight + 8;
+  }
+}
+
+playBtn.addEventListener("click", () => {
+  if (!playing && cursor >= frames.length - 1) cursor = 0;
+  playing = !playing;
+  playBtn.textContent = playing ? "⏸ 停止" : "▶ 再生";
+});
+document.getElementById("restartBtn").addEventListener("click", () => { cursor = 0; playing = true; playBtn.textContent = "⏸ 停止"; });
+document.getElementById("speedSel").addEventListener("change", (e) => { speed = parseFloat(e.target.value); });
+timeline.addEventListener("input", () => { cursor = parseInt(timeline.value, 10); playing = false; playBtn.textContent = "▶ 再生"; needPanel = true; });
+document.getElementById("resimBtn").addEventListener("click", runSim);
+document.getElementById("viewReset").addEventListener("click", setObliqueView);
+document.getElementById("viewTop").addEventListener("click", setTopView);
+document.getElementById("axesToggle").addEventListener("click", (e) => {
+  showJointAxes = !showJointAxes;
+  jointAxes.forEach((a) => (a.visible = showJointAxes));
+  e.target.textContent = `関節座標系: ${showJointAxes ? "表示" : "非表示"}`;
+});
+
+let prevTs = performance.now();
+function tick(ts) {
+  const dtReal = Math.min(0.1, (ts - prevTs) / 1000);
+  prevTs = ts;
+  if (playing) {
+    cursor += (dtReal * speed) / DT;
+    if (cursor >= frames.length - 1) { cursor = frames.length - 1; playing = false; playBtn.textContent = "▶ 再生"; }
+  }
+  const idx = Math.floor(cursor);
+  if (idx !== lastIdx) { applyFrame(idx); lastIdx = idx; needPanel = needPanel || !playing; }
+  if (needPanel || (playing && ts - lastPanel > 80)) {
+    updatePanels(frames[idx]);
+    updateLog(frames[idx].t);
+    lastPanel = ts; needPanel = false;
+  }
+  updateCamera();
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+
+runSim();
+resize();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
