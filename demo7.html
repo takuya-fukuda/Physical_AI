@@ -142,8 +142,8 @@
   .log .tag { color: var(--accent); }
   .side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
   .sec { padding: 10px 12px; min-width: 0; }
-  .sec h2 { font-size: 13.5px; margin: 0 0 6px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-  .sec h2 small { color: var(--muted); font-weight: normal; font-size: 11.5px; }
+  .sec h2 { font-size: 13.5px; margin: 0 0 6px; display: flex; flex-wrap: wrap; align-items: baseline; }
+  .sec h2 small { color: var(--muted); font-weight: normal; font-size: 11.5px; margin-left: auto; padding-left: 8px; }
   .note { color: var(--muted); font-size: 11.5px; margin: 4px 0 0; }
   .scroll { overflow-x: auto; }
   .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
@@ -1118,13 +1118,14 @@ document.getElementById("axesToggle").addEventListener("click", (e) => {
 
 let prevTs = performance.now();
 function tick(ts) {
-  const dtReal = Math.min(0.1, (ts - prevTs) / 1000);
+  // the first rAF timestamp can be earlier than performance.now() taken at load, so clamp to >= 0
+  const dtReal = clamp((ts - prevTs) / 1000, 0, 0.1);
   prevTs = ts;
   if (playing) {
     cursor += (dtReal * speed) / DT;
     if (cursor >= frames.length - 1) { cursor = frames.length - 1; playing = false; playBtn.textContent = "▶ 再生"; }
   }
-  const idx = Math.floor(cursor);
+  const idx = clamp(Math.floor(cursor), 0, frames.length - 1);
   if (idx !== lastIdx) { applyFrame(idx); lastIdx = idx; needPanel = needPanel || !playing; }
   if (needPanel || (playing && ts - lastPanel > 80)) {
     updatePanels(frames[idx]);
