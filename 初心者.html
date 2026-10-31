@@ -200,6 +200,23 @@
   @media (max-width: 700px) { .two { grid-template-columns: minmax(0, 1fr); } }
   .eqs { font: 12.5px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; margin: 4px 0 6px; padding: 4px 10px; background: var(--panel); border-radius: 6px; overflow-x: auto; white-space: nowrap; }
   h3 { font-size: 15.5px; margin: 18px 0 6px; }
+  .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; }
+  .fstep { flex: 1 1 180px; background: var(--chip); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+  .fstep b { display: block; font-size: 13.5px; }
+  .fstep span { color: var(--muted); }
+  .fstep.hl { background: var(--j1bg); outline: 1.5px solid var(--j1); }
+  .farrow { align-self: center; color: var(--muted); font-size: 18px; }
+  @media (max-width: 880px) { .flow { flex-direction: column; } .fstep { flex: none; } .farrow { transform: rotate(90deg); align-self: center; } }
+  code { font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; background: var(--panel); border-radius: 4px; padding: 0 4px; }
+  .way { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; padding: 14px 0; border-top: 1px solid var(--line); align-items: start; }
+  @media (max-width: 880px) { .way { grid-template-columns: minmax(0, 1fr); } }
+  .stage { font-size: 13.5px; font-weight: 700; color: var(--accent); min-height: 1.7em; margin-bottom: 4px; }
+  .waytext h4 { font-size: 16px; margin: 0 0 6px; }
+  .waytext h4 small { font-weight: normal; color: var(--muted); font-size: 12.5px; margin-left: 6px; }
+  .waytext dl { margin: 0; font-size: 13.5px; }
+  .waytext dt { color: var(--muted); font-size: 12px; }
+  .waytext dd { margin: 0 0 8px; }
+  .waytext .pc { font-size: 13px; background: var(--chip); border-radius: 8px; padding: 8px 12px; margin: 6px 0 0; }
   button:disabled { opacity: .5; cursor: default; }
   table.enc { border-collapse: collapse; width: 100%; font-size: 12.5px; }
   table.enc th, table.enc td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; transition: background .2s; }
@@ -222,8 +239,9 @@
     <a href="#s3">3. ヤコビアン J</a>
     <a href="#s4">4. ヤコビアンの使い道</a>
     <a href="#s4b">4+. ヤコビアンのありがたみ</a>
-    <a href="#s5">5. キャリブレーション</a>
-    <a href="#s6">6. 3D になると</a>
+    <a href="#sWays">5. ロボットを動かす 3 つの方法</a>
+    <a href="#s5">6. キャリブレーション</a>
+    <a href="#s6">7. 3D になると</a>
   </nav>
 </header>
 
@@ -415,8 +433,82 @@
   </section>
 
   <!-- ===================================================================== -->
+  <section class="card" id="sWays">
+    <h2><span class="num">5</span>ロボットは実際どうやって動かしている？</h2>
+    <p class="lead">ロボットに最終的に送るのは各関節の角度 θ です。ただし、エンジニアが θ を 1 つずつ計算して入力しているわけではありません。役割が何段かに分かれていて、θ は<b>プログラムが 1 秒間に何十〜何百回も自動で計算</b>しています。</p>
+    <div class="flow">
+      <div class="fstep"><b>① 人（エンジニア）が決める</b><span>「パレットを枠の中に戻す」<br>指先をどう動かしたいか</span></div>
+      <div class="farrow">→</div>
+      <div class="fstep"><b>② 計画</b><span>指先の通り道・目標地点を決める<br>（demo7 の <code>plan_push</code>）</span></div>
+      <div class="farrow">→</div>
+      <div class="fstep hl"><b>③ IK（その瞬間の θ を計算）</b><span>指先の目標位置 → 各関節の θ<br>（demo7 の <code>ik()</code>、1 秒に 120 回）<br>ヤコビアンが使われるのはここ</span></div>
+      <div class="farrow">→</div>
+      <div class="fstep"><b>④ サーボモーター</b><span>指令された θ になるように<br>モーターを回す</span></div>
+    </div>
+    <p class="hint">エンジニアが書いているのは主に ① と ② のルールで、θ は ③ が自動で出しています。</p>
+
+    <h3 style="margin-top:20px">ロボットを動かす方法は主に 3 通り</h3>
+
+    <div class="way">
+      <div>
+        <div class="stage" id="stTeach"></div>
+        <canvas class="view" id="cvTeach"></canvas>
+      </div>
+      <div class="waytext">
+        <h4>① ティーチング <small>工場のロボットで多い</small></h4>
+        <dl>
+          <dt>エンジニアがやること</dt><dd>人がロボットを実際に動かして、姿勢を記録する</dd>
+          <dt>θ はどう決まる？</dt><dd>記録した θ をそのまま再生する（計算はほぼ不要）</dd>
+        </dl>
+        <p class="pc"><b>得意</b>：毎回同じ動きを確実にくり返す（溶接・塗装など）<br><b>苦手</b>：物の置き場所が変わると対応できない</p>
+      </div>
+    </div>
+
+    <div class="way">
+      <div>
+        <div class="stage" id="stSpec"></div>
+        <canvas class="view" id="cvSpec"></canvas>
+      </div>
+      <div class="waytext">
+        <h4>② 指先を指定する <small>このページや demo7</small></h4>
+        <dl>
+          <dt>エンジニアがやること</dt><dd>指先の目標位置・通り道をプログラムする</dd>
+          <dt>θ はどう決まる？</dt><dd>IK（解析解やヤコビアン）が毎瞬計算する</dd>
+        </dl>
+        <p class="pc"><b>得意</b>：物の位置が変わっても計算し直せる。直線など、通り道を正確に指定できる<br><b>苦手</b>：IK や動きの計画をプログラムする手間がかかる</p>
+      </div>
+    </div>
+
+    <div class="way">
+      <div>
+        <div class="stage" id="stLearn"></div>
+        <canvas class="view" id="cvLearn"></canvas>
+      </div>
+      <div class="waytext">
+        <h4>③ 学習させる <small>LeRobot の SO-101 など</small></h4>
+        <dl>
+          <dt>エンジニアがやること</dt><dd>人がリーダーアームで操作したデータを集めて学習させる</dd>
+          <dt>θ はどう決まる？</dt><dd>カメラ画像などから、学習したモデルが θ を直接出す</dd>
+        </dl>
+        <p class="pc"><b>得意</b>：画像を見て状況に合わせられる。複雑な作業も、人がやって見せるだけで教えられる<br><b>苦手</b>：たくさんのデータと学習が必要。なぜそう動いたかを説明しにくい</p>
+        <p class="hint">データ集めのとき、フォロワーはリーダーの関節角をそのままコピーするだけなので、IK すら使いません。</p>
+      </div>
+    </div>
+
+    <h3>まとめ</h3>
+    <div class="scroll">
+      <table class="cmp">
+        <tr><th>方法</th><th>エンジニアがやること</th><th>θ はどう決まる？</th></tr>
+        <tr><td>ティーチング（工場のロボットで多い）</td><td>人がロボットを実際に動かして姿勢を記録する</td><td>記録した θ をそのまま再生する（計算はほぼ不要）</td></tr>
+        <tr><td>指先を指定する（このページや demo7）</td><td>指先の目標位置・通り道をプログラムする</td><td>IK（解析解やヤコビアン）が毎瞬計算する</td></tr>
+        <tr><td>学習させる（LeRobot の SO-101 など）</td><td>人がリーダーアームで操作したデータを集めて学習させる</td><td>カメラ画像などから、学習したモデルが θ を直接出す</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
   <section class="card" id="s5">
-    <h2><span class="num">5</span>キャリブレーション ―「コンピュータが思っている角度」を本物に合わせる</h2>
+    <h2><span class="num">6</span>キャリブレーション ―「コンピュータが思っている角度」を本物に合わせる</h2>
     <p class="lead">関節のモーターは角度そのものを知っているわけではなく、センサー（エンコーダ）の<b>生の数字</b>（0〜4095 など）を返すだけです。この数字を角度に直すには「この数字のとき 0° だ」という<b>ゼロ点</b>が必要です。ゼロ点を測って記録する作業が<b>キャリブレーション</b>です。ゼロ点がずれていると、関節の角度のずれは小さくても、<b>指先の位置は大きくずれます</b>。</p>
     <div class="demo">
       <div>
@@ -455,7 +547,7 @@
 
   <!-- ===================================================================== -->
   <section class="card" id="s6">
-    <h2><span class="num">6</span>3D（実際のロボット）になると</h2>
+    <h2><span class="num">7</span>3D（実際のロボット）になると</h2>
     <p class="lead">考え方はまったく同じで、軸が 1 本（z）増えるぶん行列が大きくなるだけです。</p>
     <div class="scroll">
       <table class="cmp">
@@ -677,7 +769,7 @@ function drawArm(v, pose, alpha = 1, color = C.link) {
   const c = v.ctx;
   c.save();
   c.globalAlpha = alpha;
-  const B = v.px([0, 0]);
+  const B = v.px(pose.j1);
   c.fillStyle = C.link;
   c.fillRect(B[0] - 20, B[1] + 8, 40, 9);
   c.strokeStyle = color; c.lineWidth = 12; c.lineCap = "round"; c.lineJoin = "round";
@@ -1261,7 +1353,191 @@ const frames = [];
 })();
 
 // ============================================================================
-// 5. キャリブレーション (関節のゼロ点合わせ)
+// 5. ロボットを動かす 3 つの方法 (イラスト)
+// ============================================================================
+/**
+ * 2 関節アームの逆運動学 (解析解、肘が上に来る側の解)。
+ * @param {Vec2} p 指先の目標位置 (根元からの相対) [m]
+ * @returns {[number, number]} [q1, q2] [rad]
+ */
+function ik2(p) {
+  const D = Math.min(1, Math.max(-1, (p[0] * p[0] + p[1] * p[1] - L1 * L1 - L2 * L2) / (2 * L1 * L2)));
+  const q2 = -Math.acos(D);
+  return [Math.atan2(p[1], p[0]) - Math.atan2(L2 * Math.sin(q2), L1 + L2 * Math.cos(q2)), q2];
+}
+
+/** @param {ArmPose} pose @param {Vec2} o @returns {ArmPose} 根元を o に平行移動した姿勢 */
+const shiftPose = (pose, o) => ({ j1: add(pose.j1, o), j2: add(pose.j2, o), p: add(pose.p, o), phi: pose.phi });
+
+/** 人の手のマーク @param {View} v @param {Vec2} p */
+function drawHand(v, p) {
+  const c = v.ctx, P = v.px(p);
+  c.save();
+  c.globalAlpha = 0.9;
+  c.beginPath(); c.arc(P[0] + 10, P[1] - 10, 12, 0, Math.PI * 2);
+  c.fillStyle = C.accent; c.fill();
+  c.globalAlpha = 1;
+  c.fillStyle = "#fff";
+  c.font = `700 13px system-ui, "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif`;
+  c.textAlign = "center"; c.textBaseline = "middle";
+  c.fillText("手", P[0] + 10, P[1] - 10);
+  c.restore();
+}
+
+/** カメラのマーク @param {View} v @param {Vec2} p @param {boolean} flash */
+function drawCamera(v, p, flash) {
+  const c = v.ctx, P = v.px(p);
+  c.save();
+  c.fillStyle = C.ink;
+  c.fillRect(P[0] - 14, P[1] - 9, 28, 18);
+  c.fillRect(P[0] - 6, P[1] - 13, 10, 4);
+  c.beginPath(); c.arc(P[0], P[1], 6, 0, Math.PI * 2);
+  c.fillStyle = flash ? C.accent : C.canvas; c.fill();
+  c.restore();
+  v.label("カメラ", p, C.muted, "center", 0, 22, 11);
+}
+
+/** 文字入りの箱 @param {View} v @param {Vec2} center @param {string} text @param {string} color */
+function drawTag(v, center, text, color) {
+  const c = v.ctx, P = v.px(center);
+  c.save();
+  c.font = `700 12px system-ui, "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif`;
+  const w = c.measureText(text).width + 18, h = 26;
+  c.fillStyle = C.canvas; c.strokeStyle = color; c.lineWidth = 2;
+  c.fillRect(P[0] - w / 2, P[1] - h / 2, w, h);
+  c.strokeRect(P[0] - w / 2, P[1] - h / 2, w, h);
+  c.fillStyle = color; c.textAlign = "center"; c.textBaseline = "middle";
+  c.fillText(text, P[0], P[1]);
+  c.restore();
+}
+
+/** @param {HTMLElement} el @param {string} text 変わったときだけ書き換える */
+const setText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
+
+// ---- ① ティーチング: 人が手で動かして θ を記録 → 記録をそのまま再生 ----------------
+(function wayTeaching() {
+  const view = new View(/** @type {HTMLCanvasElement} */ ($("cvTeach")), BOX);
+  views.push(view);
+  const stage = $("stTeach");
+  const REC_S = 4.5, PLAY_S = 4.5, N_WP = 6;
+  const MARK = ["①", "②", "③", "④", "⑤", "⑥"];
+  /** @param {number} s 0..1 @returns {number[]} 人が手で動かす関節角 [rad] */
+  const handPath = (s) => [(130 - 70 * s) * DEG, (25 + 55 * Math.sin(Math.PI * s)) * DEG];
+
+  frames.push((t) => {
+    const T = t % (REC_S + PLAY_S);
+    const rec = T < REC_S;
+    /** @type {number[][]} */
+    const wps = [];
+    for (let k = 0; k < N_WP; k++) {
+      const s = k / (N_WP - 1);
+      if (!rec || T >= s * REC_S) wps.push(handPath(s));
+    }
+    let q, playing = -1;
+    if (rec) {
+      q = handPath(T / REC_S);
+    } else {
+      // 記録した θ の間を、関節角のまま直線補間して再生
+      const u = ((T - REC_S) / PLAY_S) * (N_WP - 1);
+      const k = Math.min(N_WP - 2, Math.floor(u)), f = u - k;
+      q = [wps[k][0] + (wps[k + 1][0] - wps[k][0]) * f, wps[k][1] + (wps[k + 1][1] - wps[k][1]) * f];
+      playing = f < 0.5 ? k : k + 1;
+    }
+    setText(stage, rec ? "① 人が手で動かして、その姿勢の θ を記録中…" : "② 記録した θ をそのまま再生中（計算なし）");
+
+    view.clear();
+    wps.forEach((wp, k) => {
+      const p = fk(wp[0], wp[1]).p;
+      view.dot(p, 6, k === playing ? C.accent : C.rot);
+      view.label(MARK[k], p, k === playing ? C.accent : C.rot, "center", 0, -14, 12);
+      view.label(`${MARK[k]} θ = (${(wp[0] / DEG).toFixed(0)}°, ${(wp[1] / DEG).toFixed(0)}°)`, [BOX.xmin, BOX.ymax],
+        k === playing ? C.accent : C.muted, "left", 10, 14 + k * 17, 12);
+    });
+    const pose = fk(q[0], q[1]);
+    drawArm(view, pose);
+    if (rec) drawHand(view, pose.p);
+  });
+})();
+
+// ---- ② 指先を指定: A → B へまっすぐ、と書くと IK が毎瞬 θ を計算 ---------------------
+(function waySpecify() {
+  const view = new View(/** @type {HTMLCanvasElement} */ ($("cvSpec")), BOX);
+  views.push(view);
+  const stage = $("stSpec");
+  const A = /** @type {Vec2} */ ([-0.13, 0.11]), B = /** @type {Vec2} */ ([0.15, 0.17]);
+  /** @param {number} x 0..1 */
+  const ease = (x) => x * x * (3 - 2 * x);
+
+  frames.push((t) => {
+    const T = t % 6;
+    const s = T < 0.8 ? 0 : T < 3 ? ease((T - 0.8) / 2.2) : T < 3.8 ? 1 : 1 - ease((T - 3.8) / 2.2);
+    const p = add(A, mul(sub(B, A), s));
+    const q = ik2(p);
+    setText(stage, `プログラム「指先を A → B へまっすぐ」→ IK が計算した θ = (${(q[0] / DEG).toFixed(1)}°, ${(q[1] / DEG).toFixed(1)}°)`);
+
+    view.clear();
+    view.line(A, B, C.pos, 2, [6, 5]);
+    view.dot(A, 5, C.pos);
+    view.dot(B, 5, C.pos);
+    view.label("A", A, C.pos, "right", -10, 0, 14);
+    view.label("B", B, C.pos, "left", 10, 0, 14);
+    view.label("指先の通り道（プログラムで指定）", add(A, mul(sub(B, A), 0.5)), C.pos, "center", 0, 20, 12);
+    drawArm(view, fk(q[0], q[1]));
+  });
+})();
+
+// ---- ③ 学習: リーダーを人が動かしてデータ集め → 学習したモデルが θ を出す ---------------
+(function wayLearning() {
+  const box = { xmin: -0.42, xmax: 0.42, ymin: -0.09, ymax: 0.31 };
+  const view = new View(/** @type {HTMLCanvasElement} */ ($("cvLearn")), box);
+  views.push(view);
+  const stage = $("stLearn");
+  const LEAD = /** @type {Vec2} */ ([-0.21, 0]), FOLL = /** @type {Vec2} */ ([0.21, 0]);
+  const HOME = /** @type {Vec2} */ ([0.0, 0.2]), REACH = /** @type {Vec2} */ ([0.13, 0.045]);
+  const CAM = /** @type {Vec2} */ ([0.36, 0.26]), MODEL = /** @type {Vec2} */ ([0.0, 0.27]);
+  /** @param {number} s 0..1 @returns {number[]} ブロックに手を伸ばして戻る動き */
+  const task = (s) => ik2(add(HOME, mul(sub(REACH, HOME), 0.5 - 0.5 * Math.cos(2 * Math.PI * s))));
+
+  frames.push((t) => {
+    const T = t % 12;
+    const collect = T < 6;
+    const q = task((T % 3) / 3);
+    const arm = fk(q[0], q[1]);
+    const poseF = shiftPose(arm, FOLL);
+    setText(stage, collect
+      ? "① データ集め：人がリーダーを動かし、フォロワーが θ をそのまままねる"
+      : "② 学習後：モデルがカメラ画像から θ を出して、フォロワーが自分で動く");
+
+    view.clear();
+    // フォロワーが手を伸ばす先のブロック
+    const c = view.ctx, Bk = view.px(add(FOLL, [0.15, 0.0]));
+    c.fillStyle = C.rot;
+    c.fillRect(Bk[0] - 9, Bk[1] - 18, 18, 18);
+    if (collect) {
+      const poseL = shiftPose(arm, LEAD);
+      drawArm(view, poseL, 1, C.j1);
+      drawHand(view, poseL.p);
+      view.arrow([-0.07, 0.17], [0.07, 0.17], C.j1, 2.5);
+      view.label("θ をコピー", [0, 0.17], C.j1, "center", 0, -16, 12);
+      view.label(`記録データ：${Math.floor(T * 30)} フレーム（画像 ＋ θ）`, [box.xmin, box.ymax], C.muted, "left", 10, 14, 11);
+    } else {
+      const rest = task(0);
+      drawArm(view, shiftPose(fk(rest[0], rest[1]), LEAD), 0.15, C.j1);
+      view.label("（もう使わない）", add(LEAD, [0, 0.12]), C.muted, "center", 0, 0, 12);
+      view.arrow(add(CAM, [-0.03, 0]), add(MODEL, [0.11, 0]), C.muted, 2);
+      view.arrow(add(MODEL, [0.05, -0.025]), add(FOLL, [-0.03, 0.15]), C.accent, 2.5);
+      view.label("θ", add(MODEL, [0.1, -0.06]), C.accent, "center", 0, 0, 14);
+      drawTag(view, MODEL, "学習したモデル（AI）", C.accent);
+    }
+    drawArm(view, poseF);
+    drawCamera(view, CAM, collect && T % 0.5 < 0.08);
+    view.label(collect ? "リーダー（人が動かす）" : "", LEAD, C.j1, "center", 0, 30, 12);
+    view.label("フォロワー（ロボット）", FOLL, C.ink, "center", 0, 30, 12);
+  });
+})();
+
+// ============================================================================
+// 6. キャリブレーション (関節のゼロ点合わせ)
 // ============================================================================
 (function sectionCalibration() {
   const view = new View(/** @type {HTMLCanvasElement} */ ($("cv5")), BOX);
